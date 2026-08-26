@@ -1,14 +1,14 @@
-"""Chat routes — session management + cited Q&A via Groq."""
+"""Chat routes — session management + Strands Agent cited Q&A."""
+import asyncio
 from datetime import datetime, timezone
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from groq import Groq
 from pydantic import BaseModel, Field
 
+from agent.agent import build_agent, make_session_manager
 from auth.deps import get_current_user
-from core.config import settings
-from db.chroma import get_chroma, get_workspace_collection
+from db.chroma import get_chroma
 from db.database import get_db
 from db.models import serialize_chat_session
 
@@ -33,77 +33,6 @@ async def _require_session(session_id: str, user, db):
     if not session:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Session not found")
     return session
-
-
-def _answer_from_chroma(request: Request, workspace_id: str, question: str):
-    """Query ChromaDB and call Groq. Returns (answer, citations)."""
-    chroma = get_chroma(request)
-    collection = get_workspace_collection(chroma, workspace_id)
-    count = collection.count()
-    if count == 0:
-        return "No sources indexed yet. Add sources in the Sources page first.", []
-
-    n = min(5, count)
-    results = collection.query(
-        query_texts=[question],
-        n_results=n,
-        include=["documents", "metadatas", "distances"],
-    )
-    docs = results["documents"][0]
-    metadatas = results["metadatas"][0]
-    distances = results["distances"][0]
-
-    if not docs:
-        return "I couldn't find relevant content for that question.", []
-
-    context_parts: list[str] = []
-    citations: list[dict] = []
-    seen_labels: set[str] = set()
-    for i, (doc, meta, dist) in enumerate(zip(docs, metadatas, distances)):
-        label = (
-            meta.get("source_label") or meta.get("repo") or meta.get("title")
-            or meta.get("url") or "Unknown source"
-        )
-        context_parts.append(f"[{i + 1}] {label}\n{doc}")
-        if label not in seen_labels:
-            seen_labels.add(label)
-            citations.append({
-                "index": i + 1,
-                "source_label": label,
-                "excerpt": doc[:250] + ("…" if len(doc) > 250 else ""),
-                "score": round(1 - float(dist), 3),
-            })
-
-    if not settings.GROQ_API_KEY:
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "GROQ_API_KEY not configured")
-
-    groq_client = Groq(api_key=settings.GROQ_API_KEY)
-    completion = groq_client.chat.completions.create(
-        model="openai/gpt-oss-120b",
-        messages=[
-            {
-                "role": "system",
-                "content": (
-                    "You are Sensei, a helpful AI assistant embedded in a project knowledge platform.\n\n"
-                    "Behaviour rules:\n"
-                    "- For greetings, small-talk, or general questions (e.g. 'how are you', 'what can you do'): "
-                    "respond naturally and helpfully from your own knowledge — do NOT reference the context.\n"
-                    "- For questions about the project, code, or documentation: answer ONLY from the numbered "
-                    "context passages below. Cite every claim inline with [N] matching the passage number. "
-                    "If the context is insufficient, say so clearly — never fabricate.\n"
-                    "- Be concise. Use markdown for code or lists when helpful."
-                ),
-            },
-            {
-                "role": "user",
-                "content": f"Context passages from indexed sources:\n{'\n\n---\n\n'.join(context_parts)}\n\nQuestion: {question}",
-            },
-        ],
-        max_tokens=1024,
-        temperature=0.1,
-    )
-    answer = completion.choices[0].message.content or ""
-    return answer, citations
 
 
 # ── Session endpoints ──────────────────────────────────────────────────────────
@@ -162,7 +91,15 @@ async def send_message(
     db=Depends(get_db),
 ):
     session = await _require_session(session_id, user, db)
-    answer, citations = _answer_from_chroma(request, session["workspace_id"], body.question)
+    chroma = get_chroma(request)
+
+    sm = make_session_manager(session_id)
+    agent, captured = build_agent(session["workspace_id"], chroma, session_manager=sm)
+
+    # Strands Agent.__call__ is synchronous — run it in a thread pool
+    response = await asyncio.to_thread(agent, body.question)
+    answer = str(response)
+    citations = captured  # populated in-place by search_project_docs tool calls
 
     now = datetime.now(timezone.utc).isoformat()
     user_msg = {"role": "user", "content": body.question, "created_at": now}

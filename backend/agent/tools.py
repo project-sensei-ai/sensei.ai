@@ -413,3 +413,63 @@ async def fetch_confluence(base_url: str, email: str, api_token: str, space_key:
                     },
                 })
     return results
+
+
+def make_search_tool(workspace_id: str, chroma_client):
+    """
+    Factory that returns a (search_tool, captured_results) pair.
+    The search_tool is a Strands @tool that queries the workspace ChromaDB collection.
+    captured_results accumulates citation data from each tool call for the caller to read.
+    """
+    from db.chroma import get_workspace_collection
+
+    captured: list[dict] = []
+
+    @tool
+    def search_project_docs(query: str) -> str:
+        """
+        Search the indexed project knowledge base for content relevant to the query.
+        Returns the most relevant passages from indexed sources (GitHub repos, files, URLs, Confluence).
+        Call this for ANY question about the project, codebase, team, architecture, commits, or documentation.
+        Do NOT call this for general knowledge questions unrelated to the project.
+        """
+        collection = get_workspace_collection(chroma_client, workspace_id)
+        count = collection.count()
+        if count == 0:
+            return "No sources have been indexed yet. The user should add and ingest sources first."
+
+        n = min(5, count)
+        results = collection.query(
+            query_texts=[query],
+            n_results=n,
+            include=["documents", "metadatas", "distances"],
+        )
+
+        docs = results["documents"][0]
+        metadatas = results["metadatas"][0]
+        distances = results["distances"][0]
+
+        if not docs:
+            return "No relevant content found for this query."
+
+        passages: list[str] = []
+        seen_labels: set[str] = set()
+        for i, (doc, meta, dist) in enumerate(zip(docs, metadatas, distances)):
+            label = (
+                meta.get("source_label") or meta.get("repo") or
+                meta.get("title") or meta.get("url") or "Unknown source"
+            )
+            score = round(1 - float(dist), 3)
+            passages.append(f"[{i + 1}] Source: {label} (relevance {score:.0%})\n{doc[:500]}")
+            if label not in seen_labels:
+                seen_labels.add(label)
+                captured.append({
+                    "index": i + 1,
+                    "source_label": label,
+                    "excerpt": doc[:250] + ("…" if len(doc) > 250 else ""),
+                    "score": score,
+                })
+
+        return "\n\n---\n\n".join(passages)
+
+    return search_project_docs, captured
