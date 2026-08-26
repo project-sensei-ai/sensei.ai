@@ -40,7 +40,16 @@ def build_agent(workspace_id: str, chroma_client, session_manager=None):
             model_id=settings.BEDROCK_MODEL_ID,
             region_name=settings.AWS_REGION,
         )
-    else:
+    elif settings.LLM_BACKEND == "ollama":
+        from strands.models.openai import OpenAIModel
+        model = OpenAIModel(
+            model_id=settings.OLLAMA_MODEL,
+            client_args={
+                "api_key": "ollama",
+                "base_url": settings.OLLAMA_BASE_URL,
+            },
+        )
+    else:  # groq
         from strands.models.openai import OpenAIModel
         model = OpenAIModel(
             model_id="openai/gpt-oss-120b",

@@ -23,7 +23,9 @@ class Settings(BaseSettings):
     # AWS / Bedrock AgentCore
     AWS_REGION: str = "us-east-1"
     BEDROCK_MODEL_ID: str = "anthropic.claude-3-5-sonnet-20241022-v2:0"
-    LLM_BACKEND: str = "groq"   # "bedrock" for AWS, "groq" for local dev
+    LLM_BACKEND: str = "groq"   # "bedrock" | "groq" | "ollama"
+    OLLAMA_BASE_URL: str = "http://localhost:11434/v1"
+    OLLAMA_MODEL: str = "qwen3:4b"
 
     # Phase 2: S3 session storage (set when LLM_BACKEND=bedrock)
     S3_SESSION_BUCKET: str = ""
