@@ -161,15 +161,19 @@ Same agent. Same tools. Same memory. Different mouth.
 
 | Layer | Tech | Role |
 |---|---|---|
-| Agent Framework | [Strands Agents SDK](https://strandsagents.com/) | `@tool` decorator for ingestion functions |
-| Model Provider | **Groq** (`openai/gpt-oss-120b`) | LLM inference for chat Q&A |
-| Vector Store | **ChromaDB** (local PersistentClient) | Document embeddings, per-workspace collections |
+| Agent Framework | [Strands Agents SDK](https://strandsagents.com/) v1.26 | `@tool` functions, `Agent` agentic loop, `S3SessionManager` |
+| Model — production | **AWS Bedrock** `BedrockModel` (`LLM_BACKEND=bedrock`) | Claude / Titan / Llama via Bedrock |
+| Model — dev | **Groq** `OpenAIModel` (`LLM_BACKEND=groq`) | `openai/gpt-oss-120b` via Groq API |
+| Model — offline | **Ollama** `OpenAIModel` (`LLM_BACKEND=ollama`) | Any local model (qwen3:4b, llama3.2, etc.) |
+| Vector Store | **ChromaDB** (local PersistentClient) | Document embeddings, per-workspace `ws_{id}` collections |
+| AWS KB | **Bedrock Knowledge Bases** | Uploaded file indexing via `search_knowledge_base` @tool |
+| Session Memory | **S3** via `S3SessionManager` | Agent conversation memory per chat session |
 | Embedder | sentence-transformers `all-MiniLM-L6-v2` | Default ChromaDB embedder (no API key needed) |
-| Auth | JWT (httpOnly cookie) + bcrypt | Platform authentication |
-| Database | **MongoDB Atlas** (Motor async driver) | Users, workspaces, sources, chat sessions |
+| Auth | JWT (httpOnly cookie) + bcrypt + Google OAuth | Platform authentication |
+| Database | **MongoDB Atlas** (Motor async driver) | Users, workspaces, sources, chat sessions metadata |
 | Backend | Python 3.12+, FastAPI, Uvicorn | HTTP API |
 | Frontend | React 19, TypeScript, Tailwind CSS 4, RTK Query, Redux Toolkit | Chat UI + onboarding wizard |
-| Build | Vite, TypeScript | Dev server |
+| Deployment | Docker (`Dockerfile` + `docker-compose.yml`) | AgentCore Runtime / App Runner |
 
 ---
 
@@ -212,6 +216,9 @@ agents-for-humans/
 │   │
 │   ├── agent/
 │   │   ├── tools.py                 #   @tool: fetch_github, fetch_urls, parse_file, fetch_confluence
+│   │   │                            #          make_search_tool() factory, search_knowledge_base @tool
+│   │   ├── agent.py                 #   build_agent() — Strands Agent + model selection (bedrock/groq/ollama)
+│   │   │                            #   make_session_manager() — S3SessionManager when bucket configured
 │   │   └── ingest.py                #   run_ingestion() — chunk + embed + upsert ChromaDB
 │   │
 │   ├── db/
@@ -251,6 +258,9 @@ agents-for-humans/
 │   ├── HACKATHON.md
 │   └── AUTH_PLAN.md
 ├── Agents.md                        # Tool functions, AI layer, pipelines (detailed)
+├── Dockerfile                       # python:3.12-slim — AgentCore Runtime deployment
+├── docker-compose.yml               # local container test
+├── LICENSE                          # MIT
 └── README.md
 ```
 
