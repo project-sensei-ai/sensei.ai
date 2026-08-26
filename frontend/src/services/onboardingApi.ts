@@ -59,6 +59,26 @@ export interface ChatResponse {
   citations: ChatCitation[]
 }
 
+export interface ChatMessage {
+  role: 'user' | 'assistant'
+  content: string
+  citations?: ChatCitation[]
+  created_at: string
+}
+
+export interface ChatSession {
+  id: string
+  workspace_id: string
+  title: string
+  message_count: number
+  created_at: string
+  updated_at: string
+}
+
+export interface ChatSessionFull extends ChatSession {
+  messages: ChatMessage[]
+}
+
 // ── Input types ───────────────────────────────────────────────────────────────
 
 export type AddSourceInput =
@@ -114,8 +134,38 @@ const onboardingApi = api.injectEndpoints({
       invalidatesTags: ['Source'],
     }),
 
-    sendMessage: builder.mutation<ChatResponse, { question: string }>({
-      query: (body) => ({ url: '/chat', method: 'POST', body }),
+    // ── Chat sessions ──────────────────────────────────────────────────────────
+
+    listChatSessions: builder.query<{ sessions: ChatSession[] }, void>({
+      query: () => '/chat/sessions',
+      providesTags: ['ChatSession'],
+    }),
+
+    createChatSession: builder.mutation<{ session: ChatSession }, void>({
+      query: () => ({ url: '/chat/sessions', method: 'POST' }),
+      invalidatesTags: ['ChatSession'],
+    }),
+
+    getChatSession: builder.query<{ session: ChatSessionFull }, string>({
+      query: (id) => `/chat/sessions/${id}`,
+      providesTags: (_r, _e, id) => [{ type: 'ChatSession', id }],
+    }),
+
+    archiveChatSession: builder.mutation<void, string>({
+      query: (id) => ({ url: `/chat/sessions/${id}`, method: 'DELETE' }),
+      invalidatesTags: (_r, _e, id) => ['ChatSession', { type: 'ChatSession', id }],
+    }),
+
+    sendMessage: builder.mutation<ChatResponse, { sessionId: string; question: string }>({
+      query: ({ sessionId, question }) => ({
+        url: `/chat/sessions/${sessionId}/messages`,
+        method: 'POST',
+        body: { question },
+      }),
+      invalidatesTags: (_r, _e, { sessionId }) => [
+        'ChatSession',
+        { type: 'ChatSession', id: sessionId },
+      ],
     }),
   }),
 })
@@ -130,5 +180,9 @@ export const {
   useGetIngestStatusQuery,
   useGenerateInviteMutation,
   useDeleteSourceMutation,
+  useListChatSessionsQuery,
+  useCreateChatSessionMutation,
+  useGetChatSessionQuery,
+  useArchiveChatSessionMutation,
   useSendMessageMutation,
 } = onboardingApi

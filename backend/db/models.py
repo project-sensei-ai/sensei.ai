@@ -49,3 +49,17 @@ def serialize_invite(doc: dict) -> dict:
         "created_at": _iso(doc.get("created_at")),
         "expires_at": _iso(doc.get("expires_at")),
     }
+
+
+def serialize_chat_session(doc: dict, include_messages: bool = False) -> dict:
+    out = {
+        "id": doc["_id"],
+        "workspace_id": doc["workspace_id"],
+        "title": doc.get("title", "New chat"),
+        "message_count": len(doc.get("messages", [])),
+        "created_at": _iso(doc.get("created_at")),
+        "updated_at": _iso(doc.get("updated_at")),
+    }
+    if include_messages:
+        out["messages"] = doc.get("messages", [])
+    return out

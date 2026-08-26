@@ -44,3 +44,6 @@ async def ensure_indexes(db) -> None:
     except Exception as exc:
         print(f"[DB] invite index warning: {exc}")
     await db.invites.create_index("workspace_id")
+
+    # Chat session indexes
+    await db.chat_sessions.create_index([("workspace_id", 1), ("archived", 1), ("updated_at", -1)])
