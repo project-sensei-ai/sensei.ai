@@ -473,3 +473,39 @@ def make_search_tool(workspace_id: str, chroma_client):
         return "\n\n---\n\n".join(passages)
 
     return search_project_docs, captured
+
+
+@tool
+def search_knowledge_base(query: str) -> str:
+    """
+    Search the Bedrock Knowledge Base for uploaded documents (PDFs, text files, Word docs).
+    Use this when the question is about uploaded file content rather than GitHub repos or URLs.
+    Call alongside search_project_docs when the answer might be in uploaded documents.
+    """
+    from core.config import settings
+    if not settings.BEDROCK_KB_ID:
+        return "Bedrock Knowledge Base is not configured for this deployment."
+    try:
+        import boto3
+        client = boto3.client("bedrock-agent-runtime", region_name=settings.AWS_REGION)
+        resp = client.retrieve(
+            knowledgeBaseId=settings.BEDROCK_KB_ID,
+            retrievalQuery={"text": query},
+            retrievalConfiguration={"vectorSearchConfiguration": {"numberOfResults": 5}},
+        )
+    except Exception as exc:
+        return f"Knowledge base search failed: {exc}"
+
+    results = resp.get("retrievalResults", [])
+    if not results:
+        return "No relevant content found in the knowledge base."
+
+    passages: list[str] = []
+    for i, r in enumerate(results):
+        content = r.get("content", {}).get("text", "")
+        score = round(float(r.get("score", 0)), 3)
+        uri = r.get("location", {}).get("s3Location", {}).get("uri", f"document-{i + 1}")
+        label = uri.split("/")[-1] if "/" in uri else uri
+        passages.append(f"[{i + 1}] Source: {label} (score {score:.2f})\n{content[:500]}")
+
+    return "\n\n---\n\n".join(passages)

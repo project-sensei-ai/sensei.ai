@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     # Phase 3: Bedrock Knowledge Bases
     S3_UPLOAD_BUCKET: str = ""
     BEDROCK_KB_ID: str = ""
+    BEDROCK_KB_DATA_SOURCE_ID: str = ""  # required to trigger KB sync after upload
 
     # Frontend (used for invite URL generation)
     FRONTEND_ORIGIN: str = "http://localhost:5173"

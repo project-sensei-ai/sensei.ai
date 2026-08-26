@@ -139,7 +139,31 @@ async def upload_file(
         f.write(contents)
 
     label = file.filename or source_id
-    config = {"filename": file.filename, "size": len(contents), "path": save_path}
+    s3_uri = None
+
+    if settings.S3_UPLOAD_BUCKET:
+        try:
+            import boto3
+            s3 = boto3.client("s3", region_name=settings.AWS_REGION)
+            s3_key = f"uploads/{source_id}/{file.filename}"
+            s3.put_object(
+                Bucket=settings.S3_UPLOAD_BUCKET,
+                Key=s3_key,
+                Body=contents,
+                ContentType=file.content_type or "application/octet-stream",
+            )
+            s3_uri = f"s3://{settings.S3_UPLOAD_BUCKET}/{s3_key}"
+
+            if settings.BEDROCK_KB_ID and settings.BEDROCK_KB_DATA_SOURCE_ID:
+                ba = boto3.client("bedrock-agent", region_name=settings.AWS_REGION)
+                ba.start_ingestion_job(
+                    knowledgeBaseId=settings.BEDROCK_KB_ID,
+                    dataSourceId=settings.BEDROCK_KB_DATA_SOURCE_ID,
+                )
+        except Exception:
+            pass  # S3/KB upload is best-effort; local ingest still runs
+
+    config = {"filename": file.filename, "size": len(contents), "path": save_path, "s3_uri": s3_uri}
     now = datetime.now(timezone.utc)
     doc = {
         "_id": source_id,

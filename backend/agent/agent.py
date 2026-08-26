@@ -1,7 +1,7 @@
 from strands import Agent
 
 from core.config import settings
-from .tools import make_search_tool
+from .tools import make_search_tool, search_knowledge_base
 
 SENSEI_SYSTEM_PROMPT = """You are Sensei, a permission-aware AI assistant embedded in a collaborative workspace.
 
@@ -50,9 +50,13 @@ def build_agent(workspace_id: str, chroma_client, session_manager=None):
             },
         )
 
+    tools = [search_tool]
+    if settings.BEDROCK_KB_ID:
+        tools.append(search_knowledge_base)
+
     agent_kwargs = dict(
         model=model,
-        tools=[search_tool],
+        tools=tools,
         system_prompt=SENSEI_SYSTEM_PROMPT,
     )
     if session_manager is not None:
