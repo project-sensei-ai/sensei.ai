@@ -85,16 +85,17 @@ How content gets into the agent's memory.
 
 ### Supported Sources
 
-| Source | Auth | What It Ingests | MVP Status |
+| Source | Auth | What It Ingests | Status |
 |---|---|---|---|
-| **GitHub** | Personal Access Token | README, code files, docs | Yes — MVP |
-| **File Upload** | None (platform auth) | PDF, MD, TXT, DOCX | Yes — MVP |
-| **URLs** | None | Any public web page | Yes — MVP |
-| Confluence | API token | Wiki spaces, pages | Stretch |
-| Jira | API token | Tickets, epics, boards | Stretch |
+| **GitHub** | Personal Access Token (repo+user+project scopes) | Files, commits, contributors, collaborators, org members, org teams, PRs+reviews, issues, branches, releases, milestones, CI/CD workflows | ✅ Built |
+| **File Upload** | None (platform auth) | PDF, MD, TXT, DOCX | ✅ Built |
+| **URLs** | None | Any public web page (pre-validated with HEAD request) | ✅ Built |
+| **Confluence** | API token | Wiki spaces, pages | ✅ Built |
+| Jira | API token | Tickets, epics, boards | Future |
 | SharePoint | MS Graph OAuth | Documents, folders | Future |
 | Slack | OAuth | Channel messages | Future |
-| Meeting transcripts | MS Graph | Audio + captions | Future |
+
+See `Agents.md` for the full list of data types fetched per source and the contributors vs collaborators distinction.
 
 ### Onboarding Wizard
 
@@ -160,16 +161,15 @@ Same agent. Same tools. Same memory. Different mouth.
 
 | Layer | Tech | Role |
 |---|---|---|
-| Agent Framework | [Strands Agents SDK](https://strandsagents.com/) | Agent loop, tool orchestration, streaming |
-| Model Provider | OpenAI (or Bedrock, Anthropic, Ollama) | LLM inference |
-| Memory | Strands MemoryManager + custom store | Persistent project knowledge |
-| Auth | JWT + bcrypt | Platform authentication |
-| Database | SQLite (MVP) → PostgreSQL | Users, workspaces, sources |
-| Vector Store | ChromaDB (MVP) | Document embeddings |
-| Channels | See table below | Platform adapters |
-| Backend | Python 3.12+, FastAPI, Uvicorn | HTTP API + streaming |
-| Frontend | React 19, TypeScript, Tailwind CSS 4, Redux Toolkit | Chat UI |
-| Build | Vite 8, OxLint | Dev server + linting |
+| Agent Framework | [Strands Agents SDK](https://strandsagents.com/) | `@tool` decorator for ingestion functions |
+| Model Provider | **Groq** (`openai/gpt-oss-120b`) | LLM inference for chat Q&A |
+| Vector Store | **ChromaDB** (local PersistentClient) | Document embeddings, per-workspace collections |
+| Embedder | sentence-transformers `all-MiniLM-L6-v2` | Default ChromaDB embedder (no API key needed) |
+| Auth | JWT (httpOnly cookie) + bcrypt | Platform authentication |
+| Database | **MongoDB Atlas** (Motor async driver) | Users, workspaces, sources, chat sessions |
+| Backend | Python 3.12+, FastAPI, Uvicorn | HTTP API |
+| Frontend | React 19, TypeScript, Tailwind CSS 4, RTK Query, Redux Toolkit | Chat UI + onboarding wizard |
+| Build | Vite, TypeScript | Dev server |
 
 ---
 
@@ -190,56 +190,68 @@ Each channel is a thin adapter — it receives a message, passes it to the agent
 ## Project Structure
 
 ```
-hack-agents-for-human/
+agents-for-humans/
 ├── backend/
-│   ├── main.py                  # FastAPI app, lifespan
-│   ├── agent.py                 # Strands Agent + system prompt
+│   ├── main.py                      # FastAPI app, lifespan (MongoDB + ChromaDB init)
 │   │
-│   ├── auth/                    # Authentication
-│   │   ├── routes.py            #   POST /auth/signup, /auth/login
-│   │   └── middleware.py        #   JWT verification
+│   ├── auth/                        # Authentication
+│   │   ├── routes.py                #   /auth/register, /login, /logout, /me, /google
+│   │   └── deps.py                  #   get_current_user dependency
 │   │
-│   ├── onboarding/              # Workspace + source setup
-│   │   └── routes.py            #   POST /workspaces, /sources, /ingest
+│   ├── workspaces/
+│   │   └── routes.py                #   POST /workspaces, GET /workspaces/me, POST /invite
 │   │
-│   ├── tools/                   # Strands custom tools
-│   │   ├── github.py            #   @tool — fetch repos, files
-│   │   ├── search.py            #   @tool — vector search
-│   │   ├── upload.py            #   @tool — process uploaded files
-│   │   └── url_crawl.py         #   @tool — crawl & ingest URLs
+│   ├── sources/
+│   │   └── routes.py                #   GET/POST /sources, POST /sources/upload, DELETE /sources/{id}
 │   │
-│   ├── memory/                  # Persistent knowledge
-│   │   └── project_store.py     #   Custom MemoryStore
+│   ├── ingest/
+│   │   └── routes.py                #   POST /ingest/{id}, GET /ingest/{id}/status
 │   │
-│   ├── channels/                # Platform adapters
-│   │   ├── web.py               #   FastAPI routes for web chat
-│   │   ├── teams.py             #   Bot Framework (future)
-│   │   └── slack.py             #   Slack Bolt (future)
+│   ├── chat/
+│   │   └── routes.py                #   Session CRUD + POST /sessions/{id}/messages
 │   │
-│   ├── db/                      # Data layer
-│   │   ├── models.py            #   SQLAlchemy models
-│   │   └── connection.py        #   DB engine + session
+│   ├── agent/
+│   │   ├── tools.py                 #   @tool: fetch_github, fetch_urls, parse_file, fetch_confluence
+│   │   └── ingest.py                #   run_ingestion() — chunk + embed + upsert ChromaDB
+│   │
+│   ├── db/
+│   │   ├── database.py              #   get_db dep, ensure_indexes()
+│   │   ├── models.py                #   serialize_* functions for all collections
+│   │   └── chroma.py                #   get_chroma dep, get_workspace_collection()
+│   │
+│   ├── core/
+│   │   └── config.py                #   Settings (MONGODB_URI, GROQ_API_KEY, etc.)
 │   │
 │   ├── requirements.txt
 │   └── .env.example
 │
 ├── frontend/
 │   ├── src/
-│   │   ├── App.tsx              # Main app + routing
-│   │   ├── main.tsx
-│   │   ├── index.css
+│   │   ├── App.tsx                  # Routing (ProtectedRoute, OnboardingRoute)
+│   │   ├── components/
+│   │   │   ├── ProtectedRoute.tsx   # Auth + workspace guard
+│   │   │   ├── OnboardingRoute.tsx  # Prevents mid-wizard redirect
+│   │   │   └── AppShell.tsx         # Sidebar nav + dynamic title
 │   │   ├── pages/
-│   │   │   ├── Login.tsx        # Auth page
-│   │   │   ├── Onboard.tsx      # 3-step wizard
-│   │   │   └── Chat.tsx         # Chat interface
-│   │   ├── store/               # Redux store
-│   │   └── services/            # RTK Query APIs
-│   ├── vite.config.ts
+│   │   │   ├── Login.tsx / Register.tsx
+│   │   │   ├── Onboarding.tsx       # 4-step wizard
+│   │   │   ├── onboarding/          # StepWorkspace, StepSources, StepReview, StepInvite
+│   │   │   ├── Sources.tsx          # Source list, add, delete, re-ingest
+│   │   │   ├── Chat.tsx             # Session sidebar + conversation panel
+│   │   │   └── Dashboard.tsx
+│   │   └── services/
+│   │       ├── api.ts               # RTK Query base (tag types)
+│   │       └── onboardingApi.ts     # All endpoint hooks
+│   ├── vite.config.ts               # /api proxy → localhost:8000
 │   └── package.json
 │
-├── PRD.md
-├── README.md
-└── README_PROJECT.md
+├── docs/
+│   ├── ARCHTECTRUE.md               # This file
+│   ├── PRD.md
+│   ├── HACKATHON.md
+│   └── AUTH_PLAN.md
+├── Agents.md                        # Tool functions, AI layer, pipelines (detailed)
+└── README.md
 ```
 
 ---
@@ -291,42 +303,126 @@ async def chat_stream(message: str):
 
 ## API Endpoints
 
+All routes served at `http://localhost:8000`. Frontend accesses them via Vite proxy `/api` → `http://localhost:8000`.
+
+**Auth**
+
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| POST | `/auth/signup` | — | Create account |
-| POST | `/auth/login` | — | Get JWT token |
-| GET | `/health` | — | Backend status |
-| POST | `/api/workspaces` | JWT | Create workspace |
-| POST | `/api/sources` | JWT | Connect a source |
-| POST | `/api/ingest/{source_id}` | JWT | Trigger ingestion |
-| GET | `/api/sources` | JWT | List indexed sources |
-| POST | `/api/chat` | JWT | Chat with agent (streaming) |
-| POST | `/webhook/teams` | — | Teams bot (future) |
-| POST | `/webhook/slack` | — | Slack events (future) |
+| POST | `/auth/register` | — | Email + password registration |
+| POST | `/auth/login` | — | Sets httpOnly cookie `sensei_token` (JWT) |
+| POST | `/auth/logout` | — | Clears cookie |
+| GET | `/auth/me` | JWT | Returns current user |
+| GET | `/auth/google` | — | Redirect to Google OAuth |
+| GET | `/auth/google/callback` | — | Handles callback, sets cookie |
+
+**Workspaces**
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| POST | `/workspaces` | JWT | Create workspace (1 per user, 409 if exists) |
+| GET | `/workspaces/me` | JWT | Get workspace (404 → redirect to onboarding) |
+| POST | `/workspaces/{id}/invite` | JWT + owner | Generate 7-day invite link |
+
+**Sources**
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/sources` | JWT | List workspace sources |
+| POST | `/sources` | JWT | Add GitHub / URL / Confluence source |
+| POST | `/sources/upload` | JWT | Upload file (pdf/md/txt/docx) |
+| DELETE | `/sources/{id}` | JWT + owner | Remove from MongoDB + delete ChromaDB chunks |
+
+**Ingest**
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| POST | `/ingest/{source_id}` | JWT | Trigger ingestion as BackgroundTask (202); 409 if already indexing |
+| GET | `/ingest/{source_id}/status` | JWT | Poll status: pending / indexing / ready / error |
+
+**Chat Sessions**
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/chat/sessions` | JWT | List non-archived sessions (newest first, max 50) |
+| POST | `/chat/sessions` | JWT | Create empty session |
+| GET | `/chat/sessions/{id}` | JWT + owner | Full session with messages array |
+| POST | `/chat/sessions/{id}/messages` | JWT + owner | Send message → ChromaDB → Groq → persist → return answer + citations |
+| DELETE | `/chat/sessions/{id}` | JWT + owner | Archive session (soft delete), 204 |
 
 ---
 
 ## Database Schema
 
+MongoDB collections (Motor async driver):
+
 ```
-users                 workspaces            workspace_members
-├── id                ├── id                ├── workspace_id
-├── email             ├── name              ├── user_id
-├── password_hash     ├── description       └── role (owner/member)
-├── name              └── created_at
+users
+├── _id             (UUID)
+├── email           (unique index)
+├── password_hash
+├── name
+├── google_sub      (unique index, partial — only for Google OAuth users)
+├── picture
 └── created_at
 
-sources               documents
-├── id                ├── id
-├── workspace_id      ├── source_id
-├── type              ├── path
-│   (github/file/     ├── content
-│    url/confluence)  ├── embedding
-├── config            └── metadata
-│   (encrypted)           (author, modified_at, url)
-├── status
-│   (pending/ready/error)
-└── last_synced_at
+workspaces
+├── _id             (UUID)
+├── owner_id        (unique index — 1 workspace per user)
+├── name
+├── description
+└── created_at
+
+sources
+├── _id             (UUID)
+├── workspace_id    (index)
+├── type            (github | file | url | confluence)
+├── label           (display name)
+├── config          (repo name, URLs, etc. — no secrets)
+├── config_secret   (PAT, API tokens — never serialized to frontend)
+├── status          (pending | indexing | ready | error)
+├── stats           {chunks_count, pages_crawled}
+├── error_message
+├── created_at
+└── updated_at
+
+invites
+├── _id             (UUID)
+├── workspace_id    (index)
+├── token           (unique index)
+├── invite_url
+├── created_at
+└── expires_at      (7 days)
+
+chat_sessions
+├── _id             (UUID)
+├── workspace_id    (compound index with archived + updated_at)
+├── owner_id
+├── title           (auto-set from first user message, 60 chars)
+├── messages[]
+│   ├── role        (user | assistant)
+│   ├── content
+│   ├── citations[] (assistant messages only)
+│   └── created_at
+├── created_at
+├── updated_at      (used for sidebar sort order)
+└── archived        (bool — soft delete)
+```
+
+Vector store (ChromaDB, local PersistentClient at `./chroma_data`):
+
+```
+Collection: ws_{workspace_id}   (one per workspace)
+  ids:       {source_id}_{chunk_index}
+  documents: chunk text (2000 chars, 200-char overlap)
+  metadatas:
+    ├── source_id
+    ├── source_label
+    ├── chunk         (index)
+    ├── data_type     (file | commits | collaborators | org_members | ...)
+    ├── repo          (GitHub sources)
+    ├── path          (file sources)
+    └── url
 ```
 
 ---
@@ -359,56 +455,43 @@ DAY 4 — Demo
 
 ---
 
-## What's Built vs What's Planned
+## What's Built
 
-### Done
-- FastAPI backend scaffold with health endpoint
-- React frontend with RTK Query integration
-- Tailwind dark UI with backend status indicator
-- Vite proxy config for local dev
-- Environment config for all planned integrations
-
-### Hackathon MVP (Building Now)
-- Auth — email/password signup + JWT
-- Workspace + source management
-- GitHub repo ingestion (PAT)
-- File upload ingestion (drag & drop)
-- URL crawl ingestion (paste link)
-- Strands Agent with project Q&A system prompt
-- `search_docs` tool — vector search over indexed content
-- Streaming chat with cited sources
-- Onboarding wizard in UI
-- Web Chat channel
-
-### Hackathon Demo Stretch
-- Teams Bot channel — Bot Framework adapter
-- Confluence ingestion (API token)
+### ✅ Complete
+- Auth — email/password + JWT (httpOnly cookie) + Google OAuth
+- Workspace CRUD (1 per user) + 7-day invite links
+- Source management — GitHub (PAT), File Upload, URL, Confluence
+- GitHub ingestion — 19 data types including collaborators, org members, PAT owner profile, PR reviews, branches, releases, workflows
+- URL pre-validation before source is stored (HEAD request)
+- ChromaDB ingestion pipeline with per-source cleanup on re-ingest
+- Groq chat Q&A with two-mode system prompt and inline citations
+- Chat sessions — persistent history in MongoDB, auto-title, archive
+- 4-step onboarding wizard (workspace → sources → review → invite)
+- Sources page — live status, delete (MongoDB + ChromaDB), re-ingest
+- Chat page — session sidebar, session list, archive button
 
 ### Future (Post-Hackathon)
-- OAuth login (Google, GitHub, Microsoft)
-- Confluence, SharePoint, Jira, Slack connectors
+- Teams / Slack channel adapters
 - Real-time source sync via webhooks
 - Per-user permission filtering
-- Voice I/O via Strands bidirectional streaming
+- Jira, SharePoint connectors
 - Multi-agent orchestration
 
 ---
 
 ## Environment Variables
 
+Set these in `backend/.env` (copy from `backend/.env.example`):
+
 | Variable | Required | Description |
 |---|---|---|
-| `OPENAI_API_KEY` | Yes | OpenAI API key |
-| `GITHUB_TOKEN` | For GitHub | GitHub PAT (repo scope) |
-| `DATABASE_URL` | Yes | SQLite path or Postgres URL |
+| `MONGODB_URI` | Yes | MongoDB Atlas connection string |
 | `JWT_SECRET` | Yes | Secret for signing JWTs |
-| `TEAMS_TENANT_ID` | Future | Microsoft Teams tenant |
-| `TEAMS_CLIENT_ID` | Future | Teams app client ID |
-| `TEAMS_CLIENT_SECRET` | Future | Teams app secret |
-| `JIRA_BASE_URL` | Future | Jira instance URL |
-| `JIRA_API_TOKEN` | Future | Jira API token |
-| `CONFLUENCE_BASE_URL` | Future | Confluence URL |
-| `CONFLUENCE_API_TOKEN` | Future | Confluence API token |
+| `GROQ_API_KEY` | Yes | Groq API key (`openai/gpt-oss-120b`) |
+| `CHROMA_PERSIST_DIR` | Yes | Path for ChromaDB data (default: `./chroma_data`) |
+| `FRONTEND_ORIGIN` | Yes | Frontend URL for CORS (default: `http://localhost:5173`) |
+| `GOOGLE_CLIENT_ID` | OAuth | Google OAuth client ID |
+| `GOOGLE_CLIENT_SECRET` | OAuth | Google OAuth client secret |
 
 ---
 
