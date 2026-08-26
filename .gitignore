@@ -12,6 +12,8 @@ venv/
 *.db
 *.sqlite3
 .pytest_cache/
+backend/chroma_data/
+backend/uploads/
 
 # ===== Node / Vite (frontend) =====
 node_modules/

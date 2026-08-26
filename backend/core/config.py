@@ -16,6 +16,13 @@ class Settings(BaseSettings):
     JWT_EXPIRE_DAYS: int = 7
     GOOGLE_CLIENT_ID: str = ""
 
+    # Agent / Vector store
+    GROQ_API_KEY: str = ""
+    CHROMA_PERSIST_DIR: str = "./chroma_data"
+
+    # Frontend (used for invite URL generation)
+    FRONTEND_ORIGIN: str = "http://localhost:5173"
+
     class Config:
         env_file = ".env"
 

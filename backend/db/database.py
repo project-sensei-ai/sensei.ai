@@ -27,3 +27,20 @@ async def ensure_indexes(db) -> None:
         )
     except Exception as exc:
         print(f"[DB] index warning: {exc}")
+
+    # Workspace indexes
+    try:
+        await db.workspaces.create_index("owner_id", unique=True)
+    except Exception as exc:
+        print(f"[DB] workspace index warning: {exc}")
+
+    # Source indexes
+    await db.sources.create_index("workspace_id")
+    await db.sources.create_index([("workspace_id", 1), ("status", 1)])
+
+    # Invite indexes
+    try:
+        await db.invites.create_index("token", unique=True)
+    except Exception as exc:
+        print(f"[DB] invite index warning: {exc}")
+    await db.invites.create_index("workspace_id")

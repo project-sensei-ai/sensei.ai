@@ -1,12 +1,17 @@
 from contextlib import asynccontextmanager
 
+import chromadb
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 
 from auth.routes import router as auth_router
+from chat.routes import router as chat_router
 from core.config import settings
 from db.database import ensure_indexes
+from ingest.routes import router as ingest_router
+from sources.routes import router as sources_router
+from workspaces.routes import router as workspaces_router
 
 
 @asynccontextmanager
@@ -15,6 +20,7 @@ async def lifespan(app: FastAPI):
 
     app.state.mongo_client = None
     app.state.mongo_db = None
+    app.state.chroma_client = None
 
     if not settings.MONGO_DB:
         print("[MongoDB] MONGO_DB not set — skipping database connection")
@@ -36,6 +42,13 @@ async def lifespan(app: FastAPI):
         except Exception as exc:
             print(f"[MongoDB] CONNECTION FAILED: {exc}")
 
+    try:
+        print(f"[ChromaDB] Initializing at '{settings.CHROMA_PERSIST_DIR}'...")
+        app.state.chroma_client = chromadb.PersistentClient(path=settings.CHROMA_PERSIST_DIR)
+        print("[ChromaDB] Ready")
+    except Exception as exc:
+        print(f"[ChromaDB] INIT FAILED: {exc}")
+
     if not settings.JWT_SECRET:
         print("[Auth] WARNING: JWT_SECRET is empty — login will fail until it is set")
 
@@ -43,6 +56,7 @@ async def lifespan(app: FastAPI):
 
     if getattr(app.state, "mongo_client", None) is not None:
         app.state.mongo_client.close()
+    app.state.chroma_client = None
     print("Shutting down")
 
 
@@ -61,6 +75,10 @@ app.add_middleware(
 )
 
 app.include_router(auth_router)
+app.include_router(workspaces_router, prefix="/workspaces")
+app.include_router(sources_router, prefix="/sources")
+app.include_router(ingest_router, prefix="/ingest")
+app.include_router(chat_router, prefix="/chat")
 
 
 @app.get("/health")
