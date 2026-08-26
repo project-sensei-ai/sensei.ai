@@ -3,10 +3,22 @@ import { GoogleOAuthProvider } from '@react-oauth/google'
 import Landing from './pages/Landing'
 import Login from './pages/Login'
 import Register from './pages/Register'
+import Chat from './pages/Chat'
 import Dashboard from './pages/Dashboard'
+import Onboarding from './pages/Onboarding'
+import Sources from './pages/Sources'
 import ProtectedRoute from './components/ProtectedRoute'
+import OnboardingRoute from './components/OnboardingRoute'
 
 const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined
+
+function StubPage({ title }: { title: string }) {
+  return (
+    <div className="flex items-center justify-center min-h-svh text-muted-foreground text-sm">
+      {title} — coming soon
+    </div>
+  )
+}
 
 function Router() {
   return (
@@ -17,12 +29,46 @@ function Router() {
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
 
-        {/* PROTECTED */}
+        {/* ONBOARDING — redirects to /dashboard if workspace already exists */}
+        <Route
+          path="/onboarding"
+          element={
+            <OnboardingRoute>
+              <Onboarding />
+            </OnboardingRoute>
+          }
+        />
+
+        {/* PROTECTED — redirects to /onboarding if no workspace */}
         <Route
           path="/dashboard"
           element={
             <ProtectedRoute>
               <Dashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/sources"
+          element={
+            <ProtectedRoute>
+              <Sources />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/memory"
+          element={
+            <ProtectedRoute>
+              <StubPage title="Memory" />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/chat"
+          element={
+            <ProtectedRoute>
+              <Chat />
             </ProtectedRoute>
           }
         />
@@ -35,8 +81,6 @@ function Router() {
 
 export default function App() {
   if (!clientId) {
-    // Google sign-in disabled until VITE_GOOGLE_CLIENT_ID is set;
-    // email/password auth still works.
     return <Router />
   }
 

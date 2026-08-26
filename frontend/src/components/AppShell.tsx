@@ -52,13 +52,11 @@ import {
 } from '@/components/ui/sidebar'
 import { TooltipProvider } from '@/components/ui/tooltip'
 
-const navMain = [{ title: 'Dashboard', icon: LayoutDashboard, to: '/dashboard' }]
-
-// ponytail: placeholder entries — wire to real pages when they exist
-const navSoon = [
-  { title: 'Sources', icon: FolderGit2 },
-  { title: 'Memory', icon: Database },
-  { title: 'Chat', icon: MessageSquare },
+const navMain = [
+  { title: 'Dashboard', icon: LayoutDashboard, to: '/dashboard' },
+  { title: 'Sources', icon: FolderGit2, to: '/sources' },
+  { title: 'Memory', icon: Database, to: '/memory' },
+  { title: 'Chat', icon: MessageSquare, to: '/chat' },
 ]
 
 function ThemeToggle() {
@@ -250,21 +248,6 @@ function AppSidebar() {
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
-        <SidebarGroup>
-          <SidebarGroupLabel>Coming soon</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {navSoon.map((item) => (
-                <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton disabled tooltip={item.title}>
-                    <item.icon />
-                    <span>{item.title}</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
       </SidebarContent>
       <SidebarFooter>
         <UserFooter />
@@ -274,7 +257,7 @@ function AppSidebar() {
   )
 }
 
-export function AppShell({ children }: { children: ReactNode }) {
+export function AppShell({ children, title = 'Dashboard' }: { children: ReactNode; title?: string }) {
   return (
     <TooltipProvider>
       <SidebarProvider>
@@ -283,7 +266,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <header className="sticky top-0 z-10 flex h-14 shrink-0 items-center gap-2 border-b bg-background px-4">
             <SidebarTrigger />
             <Separator orientation="vertical" className="mr-1 h-4!" />
-            <span className="text-sm font-medium">Dashboard</span>
+            <span className="text-sm font-medium">{title}</span>
             <div className="ml-auto flex items-center gap-1">
               <ThemeToggle />
             </div>
