@@ -428,6 +428,15 @@ def make_search_tool(workspace_id: str, chroma_client):
     # tool several times per question, and per-call dedup let the same document
     # come back once per call.
     seen_labels: set[str] = set()
+    seen_chunks: set[str] = set()
+    calls = {"n": 0}
+
+    # Left unbounded, the model will re-search a half-dozen times with reworded
+    # queries, re-sending the same passages each time. That burns the context
+    # window, trips provider rate limits, and each throttled retry sleeps with
+    # exponential backoff — a question can hang for minutes. Three searches is
+    # more than enough to cover a rephrase or a second angle.
+    MAX_SEARCHES = 3
 
     @tool
     def search_project_docs(query: str) -> str:
@@ -437,18 +446,30 @@ def make_search_tool(workspace_id: str, chroma_client):
         Call this for ANY question about the project, codebase, team, architecture, commits, or documentation.
         Do NOT call this for general knowledge questions unrelated to the project.
         """
+        calls["n"] += 1
+        if calls["n"] > MAX_SEARCHES:
+            return (
+                f"Search budget reached ({MAX_SEARCHES} searches). Do not search again. "
+                "Answer the user now from the passages you have already been given. "
+                "If they do not cover the question, say plainly that the workspace "
+                "does not contain that information."
+            )
+
         collection = get_workspace_collection(chroma_client, workspace_id)
         count = collection.count()
         if count == 0:
             return "No sources have been indexed yet. The user should add and ingest sources first."
 
-        n = min(5, count)
+        # Chunks are small enough to fit the embedder's window, so ask for more of
+        # them — a section's answer is often split across two neighbouring chunks.
+        n = min(8, count)
         results = collection.query(
             query_texts=[query],
             n_results=n,
             include=["documents", "metadatas", "distances"],
         )
 
+        ids = results["ids"][0]
         docs = results["documents"][0]
         metadatas = results["metadatas"][0]
         distances = results["distances"][0]
@@ -456,14 +477,26 @@ def make_search_tool(workspace_id: str, chroma_client):
         if not docs:
             return "No relevant content found for this query."
 
+        # Only send passages the model has not already seen this turn. Re-sending
+        # them wastes the context window and makes the model think it is making
+        # progress when it is not.
+        fresh = [(i, d, m, dist) for i, d, m, dist in zip(ids, docs, metadatas, distances)
+                 if i not in seen_chunks]
+        if not fresh:
+            return (
+                "This search returned only passages you have already seen. "
+                "No new information is available for this query — answer from what you have."
+            )
+
         passages: list[str] = []
-        for i, (doc, meta, dist) in enumerate(zip(docs, metadatas, distances)):
+        for i, (chunk_id, doc, meta, dist) in enumerate(fresh):
+            seen_chunks.add(chunk_id)
             label = (
                 meta.get("source_label") or meta.get("repo") or
                 meta.get("title") or meta.get("url") or "Unknown source"
             )
             score = round(1 - float(dist), 3)
-            passages.append(f"[{i + 1}] Source: {label} (relevance {score:.0%})\n{doc[:500]}")
+            passages.append(f"[{i + 1}] Source: {label} (relevance {score:.0%})\n{doc[:800]}")
             if label not in seen_labels:
                 seen_labels.add(label)
                 captured.append({

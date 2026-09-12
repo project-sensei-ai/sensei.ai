@@ -105,10 +105,45 @@ prompts refuse to say hello, and unconstrained prompts fabricate project facts.
 
 ### Retrieval
 
-ChromaDB `collection.query(query_texts=[question], n_results=min(5, count))`.
+ChromaDB `collection.query(query_texts=[question], n_results=min(8, count))`.
 
-- Embedder: sentence-transformers `all-MiniLM-L6-v2` (default ChromaDB embedder)
+- Embedder: ONNX `all-MiniLM-L6-v2` (default ChromaDB embedder)
 - Distance metric: cosine
+
+#### The embedder truncates at 256 tokens — chunks must fit
+
+The default embedder calls `tokenizer.enable_truncation(max_length=256)`, so it
+only ever sees the first ~1 000 characters of whatever you hand it. The rest is
+silently dropped from the vector — no warning, no error.
+
+Chunks were originally 2 000 characters, so **roughly half of every chunk was
+never embedded**. Content could be indexed and still be unfindable: asking about
+the contributors/collaborators distinction returned nothing, because that section
+sat in the back half of its chunk. Re-chunking the same five documents at 800
+characters took them from 30 chunks to 78 and the question started answering
+correctly, citing the right file.
+
+Anything that changes the embedder must re-check this limit; a larger model
+(e.g. `bge-base`, 512 tokens) would allow proportionally larger chunks.
+
+#### Search budget
+
+The agent loop is free to call `search_project_docs` repeatedly, and left
+unbounded it does — up to eight times on one question, re-sending passages it had
+already seen. That fills the context window and trips provider rate limits, and
+because the SDK's default retry backs off 4→8→16→32→64 s, a throttled question
+appears to hang for minutes.
+
+Two guards, both in the tool's factory closure:
+
+- **A budget of 3 searches.** The fourth call returns an instruction to answer
+  from what it already has.
+- **Cross-call passage dedup.** Chunks already returned this turn are filtered
+  out; if a search surfaces nothing new, it says so instead of repeating itself.
+
+The Agent is also built with
+`ModelRetryStrategy(max_attempts=3, initial_delay=2, max_delay=8)` so a genuine
+rate limit surfaces in ~14 s rather than ~2 minutes.
 - Score returned to frontend: `1 − distance` (1.0 = perfect match)
 - Citations deduplicated by source label across **every tool call in a turn**, not
   just within one call. The agent loop usually calls `search_project_docs` three
@@ -168,7 +203,8 @@ POST /ingest/{source_id}
         ↓
   list[{content, metadata}]
         ↓
-  _chunk_text() — 2000-char windows, 200-char overlap
+  _chunk_text() — 800-char windows, 150-char overlap
+                  (sized to the embedder's 256-token limit)
   chunk IDs: {source_id}_0, {source_id}_1, ...
         ↓
   collection.delete(where={"source_id": ...})    ← clean slate

@@ -452,7 +452,8 @@ Vector store (ChromaDB, local PersistentClient at `./chroma_data`):
 ```
 Collection: ws_{workspace_id}   (one per workspace)
   ids:       {source_id}_{chunk_index}
-  documents: chunk text (2000 chars, 200-char overlap)
+  documents: chunk text (800 chars, 150-char overlap — the default embedder
+             truncates at 256 tokens, so larger chunks are half-invisible)
   metadatas:
     ├── source_id
     ├── source_label

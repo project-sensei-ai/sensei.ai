@@ -284,7 +284,7 @@ Verified against the code on branch `feat/agent-onboarding` at `cb3b6a9`.
 | 6 | **No permission model.** PRD FR-7 ("prevent users from receiving content they cannot access") is 0% implemented. Chunks carry no ACL metadata; retrieval has no filter. | §3.4 |
 | 7 | **Snapshot-only ingestion.** Everything is a point-in-time embed. "What's the status of INC0042317?" will be answered from a stale blob, confidently and wrongly — the exact failure PRD §8 forbids. Needs live read-through tools. | §5 H1 |
 | 8 | **No identity graph.** "What did Ramesh change?" cannot work. | §3.5 |
-| 9 | **Retrieval is a flat top-5 cosine search** over 2000-char chunks with no metadata filter, no reranking, no query routing. A "who owns X" question and a "show me the code for Y" question hit the same path. | §5 H1 |
+| 9 | **Retrieval is a flat cosine search** with no metadata filter, no reranking, no query routing. A "who owns X" question and a "show me the code for Y" question hit the same path. *(Partly addressed: chunks were 2 000 chars against a 256-token embedder, so half of each was never embedded — now 800, top-8, with a 3-search budget and cross-call dedup. The routing gap remains.)* | §5 H1 |
 | 10 | Chat sessions keyed on `owner_id`; not shareable, so no team memory. | `chat/routes.py` |
 | 11 | Local ChromaDB `PersistentClient` on the container filesystem — lost on redeploy, not shared between replicas. | Needs hosted vector store. |
 | 12 | No source deletion from the vector store on workspace delete; no tenant isolation beyond collection naming. | |

@@ -1,4 +1,4 @@
-from strands import Agent
+from strands import Agent, ModelRetryStrategy
 
 from core.config import settings
 from .tools import make_search_tool, search_knowledge_base
@@ -6,6 +6,12 @@ from .tools import make_search_tool, search_knowledge_base
 SENSEI_SYSTEM_PROMPT = """You are Sensei, a permission-aware AI assistant embedded in a collaborative workspace.
 
 You have access to a tool called `search_project_docs` that queries the workspace knowledge base — which contains indexed GitHub repositories, documentation, uploaded files, and other sources.
+
+## Search budget
+Search **once**. Search a second time only if the first result genuinely missed the
+question, and a third only if that still left a real gap. Never repeat a search you
+have already run with different wording — if two searches did not surface it, the
+workspace does not contain it, and you should say so.
 
 ## When to use the tool
 Call `search_project_docs` for ANY question that might be answered by workspace content:
@@ -67,6 +73,11 @@ def build_agent(workspace_id: str, chroma_client, session_manager=None):
         model=model,
         tools=tools,
         system_prompt=SENSEI_SYSTEM_PROMPT,
+        # The SDK default is 6 attempts backing off 4→8→16→32→64s, so a throttled
+        # question sleeps for ~2 minutes before surfacing anything. On a free-tier
+        # key that reads as a hang. Fail fast instead: ~14s worst case, then a
+        # real error the user can act on.
+        retry_strategy=ModelRetryStrategy(max_attempts=3, initial_delay=2, max_delay=8),
     )
     if session_manager is not None:
         agent_kwargs["session_manager"] = session_manager

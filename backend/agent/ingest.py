@@ -6,7 +6,16 @@ from db.chroma import get_workspace_collection
 from agent.tools import fetch_github, fetch_urls, parse_file, fetch_confluence
 
 
-def _chunk_text(text: str, chunk_size: int = 2000, overlap: int = 200) -> list[str]:
+# ChromaDB's default embedder (ONNX all-MiniLM-L6-v2) truncates its input at 256
+# tokens — roughly 1 000 characters of English. Anything past that is silently
+# dropped from the vector, so a 2 000-character chunk had half its text invisible
+# to search: a section could be indexed and still be unfindable. 800 characters
+# keeps a whole chunk inside the embedder's window.
+CHUNK_SIZE = 800
+CHUNK_OVERLAP = 150
+
+
+def _chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> list[str]:
     """Split text into overlapping character-based chunks."""
     if not text.strip():
         return []
