@@ -15,13 +15,26 @@ def serialize_user(doc: dict) -> dict:
     }
 
 
-def serialize_workspace(doc: dict) -> dict:
-    return {
+def serialize_workspace(doc: dict, role: str | None = None) -> dict:
+    out = {
         "id": doc["_id"],
         "owner_id": doc["owner_id"],
         "name": doc["name"],
         "description": doc.get("description", ""),
         "created_at": _iso(doc.get("created_at")),
+    }
+    if role is not None:
+        out["role"] = role
+    return out
+
+
+def serialize_member(doc: dict) -> dict:
+    return {
+        "id": doc["_id"],
+        "workspace_id": doc["workspace_id"],
+        "user_id": doc["user_id"],
+        "role": doc.get("role", "member"),
+        "joined_at": _iso(doc.get("joined_at")),
     }
 
 

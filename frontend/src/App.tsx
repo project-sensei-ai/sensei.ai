@@ -7,6 +7,7 @@ import Chat from './pages/Chat'
 import Dashboard from './pages/Dashboard'
 import Onboarding from './pages/Onboarding'
 import Sources from './pages/Sources'
+import Join from './pages/Join'
 import ProtectedRoute from './components/ProtectedRoute'
 import OnboardingRoute from './components/OnboardingRoute'
 
@@ -28,6 +29,9 @@ function Router() {
         <Route path="/" element={<Landing />} />
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
+
+        {/* INVITE LANDING — public; the page itself handles sign-in */}
+        <Route path="/join" element={<Join />} />
 
         {/* ONBOARDING — redirects to /dashboard if workspace already exists */}
         <Route

@@ -10,6 +10,7 @@ from auth.deps import get_current_user
 from core.config import settings
 from db.chroma import get_chroma, get_workspace_collection
 from db.database import get_db
+from db.membership import require_owner, require_workspace
 from db.models import serialize_source
 
 router = APIRouter(tags=["sources"])
@@ -44,13 +45,6 @@ class ConfluenceSourceIn(BaseModel):
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-async def _get_owner_workspace(user, db):
-    ws = await db.workspaces.find_one({"owner_id": user["id"]})
-    if not ws:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Create a workspace first")
-    return ws
-
-
 def _source_doc(workspace_id: str, source_type: str, label: str, config: dict, config_secret: dict | None = None) -> dict:
     now = datetime.now(timezone.utc)
     doc = {
@@ -77,7 +71,7 @@ async def add_source(
     user=Depends(get_current_user),
     db=Depends(get_db),
 ):
-    ws = await _get_owner_workspace(user, db)
+    ws = await require_owner(user, db)
 
     if body.type == "github":
         label = body.label or body.repo
@@ -120,7 +114,7 @@ async def upload_file(
     user=Depends(get_current_user),
     db=Depends(get_db),
 ):
-    ws = await _get_owner_workspace(user, db)
+    ws = await require_owner(user, db)
 
     ext = os.path.splitext(file.filename or "")[1].lower()
     if ext not in ALLOWED_EXTENSIONS:
@@ -185,7 +179,7 @@ async def list_sources(
     user=Depends(get_current_user),
     db=Depends(get_db),
 ):
-    ws = await _get_owner_workspace(user, db)
+    ws, _role = await require_workspace(user, db)
     cursor = db.sources.find({"workspace_id": ws["_id"]})
     sources = [serialize_source(doc) async for doc in cursor]
     return {"sources": sources}
@@ -198,7 +192,7 @@ async def delete_source(
     user=Depends(get_current_user),
     db=Depends(get_db),
 ):
-    ws = await _get_owner_workspace(user, db)
+    ws = await require_owner(user, db)
     source = await db.sources.find_one({"_id": source_id, "workspace_id": ws["_id"]})
     if not source:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Source not found")

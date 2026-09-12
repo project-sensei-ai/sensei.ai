@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   errorMessage,
   useLoginMutation,
@@ -20,6 +20,9 @@ import { Input } from '@/components/ui/input'
 
 export default function Login() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  // Invite links send people here with ?next=/join?token=… so the token survives login.
+  const next = searchParams.get('next') || '/dashboard'
   const [login, { isLoading }] = useLoginMutation()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -30,7 +33,7 @@ export default function Login() {
     setError(null)
     try {
       await login({ email, password }).unwrap()
-      navigate('/dashboard')
+      navigate(next)
     } catch (err) {
       setError(errorMessage(err))
     }
@@ -90,7 +93,7 @@ export default function Login() {
                     Or continue with Google
                   </FieldDescription>
                   <GoogleButton
-                    onSuccess={() => navigate('/dashboard')}
+                    onSuccess={() => navigate(next)}
                     onError={setError}
                   />
                 </FieldGroup>
@@ -102,7 +105,7 @@ export default function Login() {
         <p className="text-muted-foreground text-center text-sm">
           No account?{' '}
           <Link
-            to="/register"
+            to={next !== '/dashboard' ? `/register?next=${encodeURIComponent(next)}` : '/register'}
             className="text-foreground underline underline-offset-4"
           >
             Sign up

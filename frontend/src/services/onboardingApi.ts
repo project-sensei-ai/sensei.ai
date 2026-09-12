@@ -2,12 +2,16 @@ import { api } from './api'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+export type WorkspaceRole = 'owner' | 'admin' | 'member'
+
 export interface Workspace {
   id: string
   owner_id: string
   name: string
   description: string
   created_at: string
+  /** The current user's role in this workspace. Absent on older responses. */
+  role?: WorkspaceRole
 }
 
 export interface SourceStats {
@@ -129,6 +133,14 @@ const onboardingApi = api.injectEndpoints({
       query: (workspaceId) => ({ url: `/workspaces/${workspaceId}/invite`, method: 'POST' }),
     }),
 
+    joinWorkspace: builder.mutation<
+      { workspace: Workspace; already_member: boolean },
+      { token: string }
+    >({
+      query: (body) => ({ url: '/workspaces/join', method: 'POST', body }),
+      invalidatesTags: ['Workspace', 'Source', 'ChatSession'],
+    }),
+
     deleteSource: builder.mutation<void, string>({
       query: (sourceId) => ({ url: `/sources/${sourceId}`, method: 'DELETE' }),
       invalidatesTags: ['Source'],
@@ -179,6 +191,7 @@ export const {
   useTriggerIngestMutation,
   useGetIngestStatusQuery,
   useGenerateInviteMutation,
+  useJoinWorkspaceMutation,
   useDeleteSourceMutation,
   useListChatSessionsQuery,
   useCreateChatSessionMutation,

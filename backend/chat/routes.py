@@ -10,6 +10,7 @@ from agent.agent import build_agent, make_session_manager
 from auth.deps import get_current_user
 from db.chroma import get_chroma
 from db.database import get_db
+from db.membership import require_workspace
 from db.models import serialize_chat_session
 
 router = APIRouter(tags=["chat"])
@@ -20,13 +21,6 @@ class ChatRequest(BaseModel):
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
-
-async def _require_workspace(user, db):
-    ws = await db.workspaces.find_one({"owner_id": user["id"]})
-    if not ws:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "No workspace — complete onboarding first")
-    return ws
-
 
 async def _require_session(session_id: str, user, db):
     session = await db.chat_sessions.find_one({"_id": session_id, "owner_id": user["id"], "archived": False})
@@ -39,9 +33,9 @@ async def _require_session(session_id: str, user, db):
 
 @router.get("/sessions")
 async def list_sessions(user=Depends(get_current_user), db=Depends(get_db)):
-    ws = await _require_workspace(user, db)
+    ws, _role = await require_workspace(user, db)
     cursor = db.chat_sessions.find(
-        {"workspace_id": ws["_id"], "archived": False}
+        {"workspace_id": ws["_id"], "owner_id": user["id"], "archived": False}
     ).sort("updated_at", -1).limit(50)
     sessions = await cursor.to_list(50)
     return {"sessions": [serialize_chat_session(s) for s in sessions]}
@@ -49,7 +43,7 @@ async def list_sessions(user=Depends(get_current_user), db=Depends(get_db)):
 
 @router.post("/sessions", status_code=201)
 async def create_session(user=Depends(get_current_user), db=Depends(get_db)):
-    ws = await _require_workspace(user, db)
+    ws, _role = await require_workspace(user, db)
     now = datetime.now(timezone.utc)
     session_id = str(uuid4()).replace("-", "")
     doc = {

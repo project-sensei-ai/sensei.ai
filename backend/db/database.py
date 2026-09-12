@@ -45,5 +45,13 @@ async def ensure_indexes(db) -> None:
         print(f"[DB] invite index warning: {exc}")
     await db.invites.create_index("workspace_id")
 
+    # Membership indexes — one workspace per user, fast lookup by workspace
+    try:
+        await db.members.create_index("user_id", unique=True)
+    except Exception as exc:
+        print(f"[DB] member index warning: {exc}")
+    await db.members.create_index("workspace_id")
+
     # Chat session indexes
     await db.chat_sessions.create_index([("workspace_id", 1), ("archived", 1), ("updated_at", -1)])
+    await db.chat_sessions.create_index([("owner_id", 1), ("archived", 1), ("updated_at", -1)])

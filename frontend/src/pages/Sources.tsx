@@ -21,6 +21,7 @@ import {
   useAddSourceMutation,
   useDeleteSourceMutation,
   useGetSourcesQuery,
+  useGetMyWorkspaceQuery,
   useTriggerIngestMutation,
   useUploadFileMutation,
   type Source,
@@ -44,7 +45,7 @@ const TYPE_ICON: Record<string, React.ReactNode> = {
 
 // ── Source card ────────────────────────────────────────────────────────────────
 
-function SourceCard({ source }: { source: Source }) {
+function SourceCard({ source, canManage }: { source: Source; canManage: boolean }) {
   const [triggerIngest, { isLoading: ingesting }] = useTriggerIngestMutation()
   const [deleteSource, { isLoading: deleting }] = useDeleteSourceMutation()
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -81,7 +82,7 @@ function SourceCard({ source }: { source: Source }) {
           {cfg.icon} {cfg.label}
         </Badge>
 
-        {(source.status === 'pending' || source.status === 'error') && (
+        {canManage && (source.status === 'pending' || source.status === 'error') && (
           <Button size="sm" variant="outline" className="h-7 gap-1 text-xs"
             disabled={ingesting} onClick={() => triggerIngest(source.id)}>
             <RefreshCw className={`h-3 w-3 ${ingesting ? 'animate-spin' : ''}`} />
@@ -89,20 +90,22 @@ function SourceCard({ source }: { source: Source }) {
           </Button>
         )}
 
-        <Button
-          size="sm"
-          variant={confirmDelete ? 'destructive' : 'ghost'}
-          className="h-7 gap-1 text-xs"
-          disabled={deleting}
-          onClick={handleDelete}
-          onBlur={() => setConfirmDelete(false)}
-        >
-          {deleting
-            ? <Loader2 className="h-3 w-3 animate-spin" />
-            : confirmDelete
-            ? 'Confirm delete'
-            : <Trash2 className="h-3 w-3" />}
-        </Button>
+        {canManage && (
+          <Button
+            size="sm"
+            variant={confirmDelete ? 'destructive' : 'ghost'}
+            className="h-7 gap-1 text-xs"
+            disabled={deleting}
+            onClick={handleDelete}
+            onBlur={() => setConfirmDelete(false)}
+          >
+            {deleting
+              ? <Loader2 className="h-3 w-3 animate-spin" />
+              : confirmDelete
+              ? 'Confirm delete'
+              : <Trash2 className="h-3 w-3" />}
+          </Button>
+        )}
       </div>
     </div>
   )
@@ -359,6 +362,9 @@ function AddSourcePanel({ onClose }: { onClose: () => void }) {
 export default function Sources() {
   const [showAdd, setShowAdd] = useState(false)
   const { data, isLoading } = useGetSourcesQuery(undefined, { pollingInterval: 4000 })
+  const { data: wsData } = useGetMyWorkspaceQuery()
+  // Members can see what the agent knows, but only owners change it.
+  const canManage = wsData?.workspace?.role !== 'member'
   const sources = data?.sources ?? []
   const hasActive = sources.some((s) => s.status === 'indexing' || s.status === 'pending')
 
@@ -373,13 +379,17 @@ export default function Sources() {
               {hasActive && ' · indexing in progress…'}
             </p>
           </div>
-          <Button size="sm" className="gap-1.5" onClick={() => setShowAdd((s) => !s)}>
-            <Plus className="h-4 w-4" />
-            Add source
-          </Button>
+          {canManage ? (
+            <Button size="sm" className="gap-1.5" onClick={() => setShowAdd((s) => !s)}>
+              <Plus className="h-4 w-4" />
+              Add source
+            </Button>
+          ) : (
+            <Badge variant="secondary" className="text-xs">Read-only</Badge>
+          )}
         </div>
 
-        {showAdd && <AddSourcePanel onClose={() => setShowAdd(false)} />}
+        {canManage && showAdd && <AddSourcePanel onClose={() => setShowAdd(false)} />}
 
         {isLoading ? (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -387,11 +397,13 @@ export default function Sources() {
           </div>
         ) : sources.length === 0 ? (
           <div className="rounded-xl border border-dashed p-10 text-center text-muted-foreground text-sm">
-            No sources yet. Add a file, URL, or GitHub repo to get started.
+            {canManage
+              ? 'No sources yet. Add a file, URL, or GitHub repo to get started.'
+              : 'No sources yet. Your project owner needs to connect some.'}
           </div>
         ) : (
           <div className="flex flex-col gap-2">
-            {sources.map((s) => <SourceCard key={s.id} source={s} />)}
+            {sources.map((s) => <SourceCard key={s.id} source={s} canManage={canManage} />)}
           </div>
         )}
       </div>

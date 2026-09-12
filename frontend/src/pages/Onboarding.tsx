@@ -20,7 +20,6 @@ export default function Onboarding() {
 
   const [step, setStep] = useState<WizardStep>(1)
   const [workspaceId, setWorkspaceId] = useState<string | null>(null)
-  const [sourceIds, setSourceIds] = useState<string[]>([])
 
   return (
     <div className="min-h-svh bg-background flex flex-col">
@@ -86,7 +85,7 @@ export default function Onboarding() {
           {step === 2 && workspaceId && (
             <StepSources
               workspaceId={workspaceId}
-              onDone={(ids) => { setSourceIds(ids); setStep(3) }}
+              onDone={() => setStep(3)}
             />
           )}
           {step === 3 && (

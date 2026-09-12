@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   errorMessage,
   useRegisterMutation,
@@ -20,6 +20,9 @@ import { Input } from '@/components/ui/input'
 
 export default function Register() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  // Invite links send people here with ?next=/join?token=… so the token survives login.
+  const next = searchParams.get('next') || '/dashboard'
   const [register, { isLoading }] = useRegisterMutation()
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
@@ -31,7 +34,7 @@ export default function Register() {
     setError(null)
     try {
       await register({ name, email, password }).unwrap()
-      navigate('/dashboard')
+      navigate(next)
     } catch (err) {
       setError(errorMessage(err))
     }
@@ -104,7 +107,7 @@ export default function Register() {
                     {isLoading ? 'Creating account…' : 'Create account'}
                   </Button>
                   <GoogleButton
-                    onSuccess={() => navigate('/dashboard')}
+                    onSuccess={() => navigate(next)}
                     onError={setError}
                   />
                 </FieldGroup>
@@ -116,7 +119,7 @@ export default function Register() {
         <p className="text-muted-foreground text-center text-sm">
           Already have an account?{' '}
           <Link
-            to="/login"
+            to={next !== '/dashboard' ? `/login?next=${encodeURIComponent(next)}` : '/login'}
             className="text-foreground underline underline-offset-4"
           >
             Log in

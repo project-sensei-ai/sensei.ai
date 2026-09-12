@@ -22,6 +22,10 @@ class Settings(BaseSettings):
 
     # AWS / Bedrock AgentCore
     AWS_REGION: str = "us-east-1"
+    # Declared so a .env carrying static keys loads; boto3 still reads them from the
+    # environment itself. Prefer an IAM role in deployed environments.
+    AWS_ACCESS_KEY_ID: str = ""
+    AWS_SECRET_ACCESS_KEY: str = ""
     BEDROCK_MODEL_ID: str = "anthropic.claude-3-5-sonnet-20241022-v2:0"
     LLM_BACKEND: str = "groq"   # "bedrock" | "groq" | "ollama"
     OLLAMA_BASE_URL: str = "http://localhost:11434/v1"
@@ -40,6 +44,9 @@ class Settings(BaseSettings):
 
     class Config:
         env_file = ".env"
+        # Never crash on an unrecognised env var — a stale key in someone's .env
+        # should not stop the app from booting.
+        extra = "ignore"
 
 
 settings = Settings()
