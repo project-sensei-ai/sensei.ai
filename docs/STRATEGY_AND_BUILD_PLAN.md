@@ -300,12 +300,12 @@ Goal: a submission that cannot break on camera. **No new features. No new connec
 
 | # | Task | Est. | Why |
 |---|---|---|---|
-| H0-1 | Make the repo public; confirm MIT shows in the GitHub About panel | 5 min | Pass/fail rule |
+| H0-1 | ⬜ **Yours** — make the repo public; confirm MIT shows in the GitHub About panel. Rotate the AWS keys in `backend/.env` first (never committed, but cheap insurance). | 5 min | Pass/fail rule |
 | H0-2 | ✅ Fix the README env var (`MONGO_DB`) — **also fixed the boot crash and the broken build**. Still to do: a clean-machine `git clone` → run test | 45 min | Rule 3: judges must be able to run it |
 | H0-3 | ✅ **`/join` implemented and verified end to end** — `members` collection, `POST /workspaces/join`, all workspace lookups switched to membership, `/join` landing page, `?next=` through auth, role-gated Sources UI. Tested: owner creates → invites → teammate registers → joins → asks a question through the Strands agent. Boundaries verified: member gets 403 on writes, 200 on reads, cannot see the owner's sessions; bad token 404, expired 410, cross-workspace 409, re-click idempotent. | 2 h | Rules: "no dead buttons", "functions as depicted" |
-| H0-4 | Seed a demo workspace + demo login credentials for judges; document in testing instructions | 45 min | Rule 4 |
-| H0-5 | Architecture diagram as an actual image (export the ASCII from `ARCHTECTRUE.md` to PNG/SVG) | 45 min | Required artifact |
-| H0-6 | Deploy a live URL (App Runner or Fly.io; AgentCore only if it works first try — do not burn hours on it). Must stay up through Oct 8. | 2–3 h | Scores Technical Implementation |
+| H0-4 | ✅ `TESTING.md` — demo account `judge@sensei.demo`, a seeded "Sensei Demo Project" workspace holding the project's own docs (30 chunks, verified answering with citations), suggested questions, and the two-account invite walkthrough. | 45 min | Rule 4 |
+| H0-5 | ✅ `docs/assets/architecture.{svg,png}` — generated from a script so it stays editable; embedded in README and ARCHTECTRUE. Marks built vs planned honestly. | 45 min | Required artifact |
+| H0-6 | 🟡 **Prepared, not executed** — the app is now single-origin (API under `/api`, FastAPI serves the built SPA), with a multi-stage Dockerfile, `fly.toml` and `DEPLOY.md` covering Fly and App Runner. Verified locally end to end. **The image build itself is unverified — Docker was not running.** Run `docker compose up --build` once, then deploy. | 2–3 h | Scores Technical Implementation |
 | H0-7 | Record the ≤5-min video: 30s problem → 45s architecture → 3min live demo → 30s impact. Script it, rehearse once, captions on. | 3 h | 20% of the score |
 | H0-8 | If and only if time remains: 1–2 builder.aws.com posts with "Agents for Humans" in the title (+0.2 each, max +0.6) | 1 h each | Bonus |
 
