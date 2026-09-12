@@ -27,12 +27,17 @@ cp .env.example .env
 Edit `backend/.env`:
 
 ```
-MONGODB_URI=mongodb+srv://...
+MONGO_DB=mongodb+srv://...
+MONGO_DB_NAME=sensei
 JWT_SECRET=your-secret-here
 GROQ_API_KEY=gsk_...
 CHROMA_PERSIST_DIR=./chroma_data
 FRONTEND_ORIGIN=http://localhost:5173
+DEBUG=true
 ```
+
+> `DEBUG=true` is required for local HTTP — it drops the `Secure` flag on the
+> session cookie so login works without TLS.
 
 ### Frontend
 
@@ -68,10 +73,23 @@ npm run dev
 
 ## How It Works
 
+**As a project owner**
+
 1. **Sign up** → create a workspace (one per user)
 2. **Add sources** — GitHub repo (PAT), file upload, URL, or Confluence
 3. **Ingest** — sources are chunked and embedded into ChromaDB (runs in background)
-4. **Chat** — ask questions, get answers with inline citations linking back to the source
+4. **Invite your team** — generate a 7-day invite link from the onboarding wizard
+5. **Chat** — ask questions, get answers with inline citations linking back to the source
+
+**As a teammate**
+
+1. Open the invite link → sign up or log in (the invite token survives the redirect)
+2. You land in the owner's workspace as a **member**
+3. **Chat** straight away — you can read what the agent knows and ask anything
+
+Roles: **owners** connect and manage sources; **members** get read-only visibility
+into the source list and their own private chat sessions. Access is resolved in one
+place, `backend/db/membership.py`, so no route can accidentally skip the check.
 
 GitHub ingestion extracts 19 data types: file contents, commits, contributors, collaborators (including org owners), org members, teams, PRs with reviews, issues, branches, releases, milestones, and CI/CD workflows. See `Agents.md` for details.
 
@@ -84,7 +102,7 @@ agents-for-humans/
 ├── backend/
 │   ├── main.py              # FastAPI app + lifespan (MongoDB + ChromaDB)
 │   ├── auth/                # JWT auth + Google OAuth
-│   ├── workspaces/          # Workspace CRUD + invite links
+│   ├── workspaces/          # Workspace CRUD + invite links + join
 │   ├── sources/             # Source management + file upload
 │   ├── ingest/              # Background ingestion trigger + status
 │   ├── chat/                # Chat sessions + Groq Q&A
@@ -92,10 +110,11 @@ agents-for-humans/
 │   │   ├── tools.py         # Strands @tool functions (fetch_github, fetch_urls, etc.)
 │   │   └── ingest.py        # Chunking + ChromaDB upsert pipeline
 │   ├── db/                  # MongoDB + ChromaDB helpers
+│   │   └── membership.py    # require_workspace / require_owner — the access rule
 │   └── core/config.py       # Settings
 ├── frontend/
 │   ├── src/
-│   │   ├── pages/           # Login, Register, Onboarding, Sources, Chat, Dashboard
+│   │   ├── pages/           # Login, Register, Onboarding, Join, Sources, Chat, Dashboard
 │   │   ├── components/      # AppShell, ProtectedRoute, OnboardingRoute
 │   │   └── services/        # RTK Query API hooks
 │   └── vite.config.ts       # /api proxy → localhost:8000

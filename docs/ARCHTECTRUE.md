@@ -36,12 +36,16 @@ Three layers, kept simple.
 │  Every request carries this token                           │
 ├─────────────────────────────────────────────────────────────┤
 │  LAYER 2 — WHICH WORKSPACE?                                 │
-│  User belongs to one or more workspaces                     │
-│  Role: Owner (manages sources) or Member (chats only)       │
+│  `members` collection — one membership per user             │
+│  Role: Owner (manages sources) or Member (reads + chats)    │
+│  Resolved only via db/membership.py require_workspace()     │
 ├─────────────────────────────────────────────────────────────┤
 │  LAYER 3 — CAN WE ACCESS THIS SOURCE?                       │
-│  OAuth tokens / API keys stored encrypted per workspace     │
+│  PATs / API tokens held per source in `config_secret`,      │
+│  never serialized to the frontend                           │
 │  Agent uses these to fetch content on behalf of the org     │
+│  ⚠ MVP: stored as plaintext in MongoDB. Envelope encryption │
+│    (KMS data key) is the first post-hackathon security task. │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -50,9 +54,9 @@ Three layers, kept simple.
 | What | Full Vision | MVP |
 |---|---|---|
 | Login | OAuth (Google, GitHub, Microsoft) | Email + password only |
-| Roles | Owner, Admin, Member, Viewer | Owner + Member |
-| Source perms | Per-user, per-source ACL | Owner sees all, members chat |
-| Token storage | Vault / KMS encrypted | Encrypted at rest in DB |
+| Roles | Owner, Admin, Member, Viewer | Owner + Member (both implemented) |
+| Source perms | Per-user, per-source ACL | Owner writes, members read; no per-item ACL yet |
+| Token storage | Vault / KMS envelope encryption | ⚠ Plaintext in MongoDB, withheld from API responses |
 
 ---
 
@@ -118,7 +122,10 @@ Step 3: REVIEW
         └─ Owner approves or adjusts scope
         
 Step 4: INVITE TEAM
-        Send invite link → members start chatting
+        Generate a 7-day invite link → teammate opens /join?token=…
+        → signs up or logs in (?next= carries the token through auth)
+        → POST /workspaces/join adds them as a member
+        → they land in Chat
 ```
 
 ---
@@ -203,7 +210,8 @@ agents-for-humans/
 │   │   └── deps.py                  #   get_current_user dependency
 │   │
 │   ├── workspaces/
-│   │   └── routes.py                #   POST /workspaces, GET /workspaces/me, POST /invite
+│   │   └── routes.py                #   POST /workspaces, GET /workspaces/me,
+│   │                                #   POST /{id}/invite, POST /join
 │   │
 │   ├── sources/
 │   │   └── routes.py                #   GET/POST /sources, POST /sources/upload, DELETE /sources/{id}
@@ -222,6 +230,8 @@ agents-for-humans/
 │   │   └── ingest.py                #   run_ingestion() — chunk + embed + upsert ChromaDB
 │   │
 │   ├── db/
+│   │   ├── membership.py            #   require_workspace() / require_owner() —
+│   │   │                            #   the single place access is decided
 │   │   ├── database.py              #   get_db dep, ensure_indexes()
 │   │   ├── models.py                #   serialize_* functions for all collections
 │   │   └── chroma.py                #   get_chroma dep, get_workspace_collection()
@@ -240,7 +250,8 @@ agents-for-humans/
 │   │   │   ├── OnboardingRoute.tsx  # Prevents mid-wizard redirect
 │   │   │   └── AppShell.tsx         # Sidebar nav + dynamic title
 │   │   ├── pages/
-│   │   │   ├── Login.tsx / Register.tsx
+│   │   │   ├── Login.tsx / Register.tsx   # both honour ?next= for invite links
+│   │   │   ├── Join.tsx             # invite landing — /join?token=…
 │   │   │   ├── Onboarding.tsx       # 4-step wizard
 │   │   │   ├── onboarding/          # StepWorkspace, StepSources, StepReview, StepInvite
 │   │   │   ├── Sources.tsx          # Source list, add, delete, re-ingest
@@ -333,22 +344,26 @@ All routes served at `http://localhost:8000`. Frontend accesses them via Vite pr
 | POST | `/workspaces` | JWT | Create workspace (1 per user, 409 if exists) |
 | GET | `/workspaces/me` | JWT | Get workspace (404 → redirect to onboarding) |
 | POST | `/workspaces/{id}/invite` | JWT + owner | Generate 7-day invite link |
+| POST | `/workspaces/join` | JWT | Accept an invite token; adds a `member` row. 404 bad token, 410 expired, 409 already in another workspace. Idempotent — re-opening a link returns `already_member: true` |
+
+`GET /workspaces/me` resolves by **membership**, not ownership, and returns the
+caller's `role` so the UI can hide owner-only controls.
 
 **Sources**
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| GET | `/sources` | JWT | List workspace sources |
-| POST | `/sources` | JWT | Add GitHub / URL / Confluence source |
-| POST | `/sources/upload` | JWT | Upload file (pdf/md/txt/docx) |
+| GET | `/sources` | JWT + member | List workspace sources (read-only for members) |
+| POST | `/sources` | JWT + owner | Add GitHub / URL / Confluence source |
+| POST | `/sources/upload` | JWT + owner | Upload file (pdf/md/txt/docx) |
 | DELETE | `/sources/{id}` | JWT + owner | Remove from MongoDB + delete ChromaDB chunks |
 
 **Ingest**
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| POST | `/ingest/{source_id}` | JWT | Trigger ingestion as BackgroundTask (202); 409 if already indexing |
-| GET | `/ingest/{source_id}/status` | JWT | Poll status: pending / indexing / ready / error |
+| POST | `/ingest/{source_id}` | JWT + owner | Trigger ingestion as BackgroundTask (202); 409 if already indexing |
+| GET | `/ingest/{source_id}/status` | JWT + member | Poll status: pending / indexing / ready / error |
 
 **Chat Sessions**
 
@@ -395,6 +410,14 @@ sources
 ├── error_message
 ├── created_at
 └── updated_at
+
+members
+├── _id             (UUID)
+├── workspace_id    (index)
+├── user_id         (unique index — one workspace per user)
+├── role            (owner | member)
+├── invited_by      (user_id of the inviter, null for owners)
+└── joined_at
 
 invites
 ├── _id             (UUID)
@@ -469,7 +492,9 @@ DAY 4 — Demo
 
 ### ✅ Complete
 - Auth — email/password + JWT (httpOnly cookie) + Google OAuth
-- Workspace CRUD (1 per user) + 7-day invite links
+- Workspace CRUD (1 per user) + 7-day invite links + **working join flow**
+- Membership + roles — owners manage sources, members read and chat; chat sessions
+  are private to the person who started them
 - Source management — GitHub (PAT), File Upload, URL, Confluence
 - GitHub ingestion — 19 data types including collaborators, org members, PAT owner profile, PR reviews, branches, releases, workflows
 - URL pre-validation before source is stored (HEAD request)
@@ -481,6 +506,10 @@ DAY 4 — Demo
 - Chat page — session sidebar, session list, archive button
 
 ### Future (Post-Hackathon)
+
+See `docs/STRATEGY_AND_BUILD_PLAN.md` for the full sequenced plan, market
+analysis, and access-model design.
+
 - Teams / Slack channel adapters
 - Real-time source sync via webhooks
 - Per-user permission filtering
@@ -495,13 +524,17 @@ Set these in `backend/.env` (copy from `backend/.env.example`):
 
 | Variable | Required | Description |
 |---|---|---|
-| `MONGODB_URI` | Yes | MongoDB Atlas connection string |
+| `MONGO_DB` | Yes | MongoDB Atlas connection string |
+| `MONGO_DB_NAME` | Yes | Database name (default: `sensei`) |
+| `DEBUG` | Local | `true` drops the cookie `Secure` flag so login works over HTTP |
 | `JWT_SECRET` | Yes | Secret for signing JWTs |
 | `GROQ_API_KEY` | Yes | Groq API key (`openai/gpt-oss-120b`) |
 | `CHROMA_PERSIST_DIR` | Yes | Path for ChromaDB data (default: `./chroma_data`) |
 | `FRONTEND_ORIGIN` | Yes | Frontend URL for CORS (default: `http://localhost:5173`) |
 | `GOOGLE_CLIENT_ID` | OAuth | Google OAuth client ID |
-| `GOOGLE_CLIENT_SECRET` | OAuth | Google OAuth client secret |
+| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | Bedrock | Only for `LLM_BACKEND=bedrock`; prefer an IAM role in deployed environments |
+
+Unrecognised variables in `.env` are ignored rather than fatal.
 
 ---
 
@@ -531,4 +564,4 @@ model = OllamaModel(host="http://localhost:11434", model_id="llama3")
 
 ## License
 
-Internal hackathon project.
+MIT — see `LICENSE`.
