@@ -41,6 +41,9 @@ class Settings(BaseSettings):
 
     # Frontend (used for invite URL generation)
     FRONTEND_ORIGIN: str = "http://localhost:5173"
+    # Built SPA served by this app in single-origin deployments. Empty or missing
+    # directory = API only (the local dev setup, where Vite serves the frontend).
+    STATIC_DIR: str = "static"
 
     class Config:
         env_file = ".env"

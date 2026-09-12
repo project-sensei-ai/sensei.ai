@@ -1,8 +1,11 @@
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import chromadb
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from motor.motor_asyncio import AsyncIOMotorClient
 
 from auth.routes import router as auth_router
@@ -74,18 +77,48 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(auth_router)
-app.include_router(workspaces_router, prefix="/workspaces")
-app.include_router(sources_router, prefix="/sources")
-app.include_router(ingest_router, prefix="/ingest")
-app.include_router(chat_router, prefix="/chat")
+# Every API route lives under /api so a built SPA can be served from the same
+# origin — no CORS, no second deploy, one URL. In dev, Vite proxies /api through
+# to this app without rewriting, so the paths are identical in both.
+API_PREFIX = "/api"
+
+app.include_router(auth_router, prefix=API_PREFIX)
+app.include_router(workspaces_router, prefix=f"{API_PREFIX}/workspaces")
+app.include_router(sources_router, prefix=f"{API_PREFIX}/sources")
+app.include_router(ingest_router, prefix=f"{API_PREFIX}/ingest")
+app.include_router(chat_router, prefix=f"{API_PREFIX}/chat")
 
 
-@app.get("/health")
-async def health():
+def _health() -> dict:
     return {"status": "ok", "version": settings.APP_VERSION}
 
 
-@app.get("/")
-async def root():
-    return {"message": f"Welcome to {settings.APP_NAME}"}
+# Unprefixed /health too, so container and platform health probes work as-is.
+app.get("/health")(_health)
+app.get(f"{API_PREFIX}/health")(_health)
+
+
+# ── SPA ───────────────────────────────────────────────────────────────────────
+# Mounted only when a build is present (the Docker image copies one in). Without
+# it this stays an API-only app, which is what `uvicorn main:app --reload` wants.
+_static = Path(settings.STATIC_DIR)
+
+if (_static / "index.html").is_file():
+    if (_static / "assets").is_dir():
+        app.mount("/assets", StaticFiles(directory=_static / "assets"), name="assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def spa(full_path: str):
+        """Serve built files, falling back to index.html so client routes work on reload."""
+        if full_path.startswith("api/"):
+            raise HTTPException(404, "Not found")
+        candidate = (_static / full_path).resolve()
+        if full_path and candidate.is_file() and candidate.is_relative_to(_static.resolve()):
+            return FileResponse(candidate)
+        return FileResponse(_static / "index.html")
+
+    print(f"[SPA] Serving built frontend from '{_static}'")
+else:
+    @app.get("/")
+    async def root():
+        return {"message": f"Welcome to {settings.APP_NAME}", "docs": "/docs", "api": API_PREFIX}

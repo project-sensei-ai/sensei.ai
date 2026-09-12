@@ -180,7 +180,7 @@ Same agent. Same tools. Same memory. Different mouth.
 | Database | **MongoDB Atlas** (Motor async driver) | Users, workspaces, sources, chat sessions metadata |
 | Backend | Python 3.12+, FastAPI, Uvicorn | HTTP API |
 | Frontend | React 19, TypeScript, Tailwind CSS 4, RTK Query, Redux Toolkit | Chat UI + onboarding wizard |
-| Deployment | Docker (`Dockerfile` + `docker-compose.yml`) | AgentCore Runtime / App Runner |
+| Deployment | Multi-stage Docker — Node builds the SPA, FastAPI serves it with the API | Fly.io / App Runner / AgentCore — see `DEPLOY.md` |
 
 ---
 
@@ -324,27 +324,32 @@ async def chat_stream(message: str):
 
 ## API Endpoints
 
-All routes served at `http://localhost:8000`. Frontend accesses them via Vite proxy `/api` → `http://localhost:8000`.
+All API routes are served under **`/api`**. In development Vite proxies `/api`
+through to `http://localhost:8000` without rewriting; in a deployment the same
+FastAPI app serves both the API and the built SPA from one origin, so the paths
+the frontend calls never change. Swagger stays at `/docs`.
+
+![Architecture](assets/architecture.png)
 
 **Auth**
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| POST | `/auth/register` | — | Email + password registration |
-| POST | `/auth/login` | — | Sets httpOnly cookie `sensei_token` (JWT) |
-| POST | `/auth/logout` | — | Clears cookie |
-| GET | `/auth/me` | JWT | Returns current user |
-| GET | `/auth/google` | — | Redirect to Google OAuth |
-| GET | `/auth/google/callback` | — | Handles callback, sets cookie |
+| POST | `/api/auth/register` | — | Email + password registration |
+| POST | `/api/auth/login` | — | Sets httpOnly cookie `sensei_token` (JWT) |
+| POST | `/api/auth/logout` | — | Clears cookie |
+| GET | `/api/auth/me` | JWT | Returns current user |
+| GET | `/api/auth/google` | — | Redirect to Google OAuth |
+| GET | `/api/auth/google/callback` | — | Handles callback, sets cookie |
 
 **Workspaces**
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| POST | `/workspaces` | JWT | Create workspace (1 per user, 409 if exists) |
-| GET | `/workspaces/me` | JWT | Get workspace (404 → redirect to onboarding) |
-| POST | `/workspaces/{id}/invite` | JWT + owner | Generate 7-day invite link |
-| POST | `/workspaces/join` | JWT | Accept an invite token; adds a `member` row. 404 bad token, 410 expired, 409 already in another workspace. Idempotent — re-opening a link returns `already_member: true` |
+| POST | `/api/workspaces` | JWT | Create workspace (1 per user, 409 if exists) |
+| GET | `/api/workspaces/me` | JWT | Get workspace (404 → redirect to onboarding) |
+| POST | `/api/workspaces/{id}/invite` | JWT + owner | Generate 7-day invite link |
+| POST | `/api/workspaces/join` | JWT | Accept an invite token; adds a `member` row. 404 bad token, 410 expired, 409 already in another workspace. Idempotent — re-opening a link returns `already_member: true` |
 
 `GET /workspaces/me` resolves by **membership**, not ownership, and returns the
 caller's `role` so the UI can hide owner-only controls.
@@ -353,27 +358,27 @@ caller's `role` so the UI can hide owner-only controls.
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| GET | `/sources` | JWT + member | List workspace sources (read-only for members) |
-| POST | `/sources` | JWT + owner | Add GitHub / URL / Confluence source |
-| POST | `/sources/upload` | JWT + owner | Upload file (pdf/md/txt/docx) |
-| DELETE | `/sources/{id}` | JWT + owner | Remove from MongoDB + delete ChromaDB chunks |
+| GET | `/api/sources` | JWT + member | List workspace sources (read-only for members) |
+| POST | `/api/sources` | JWT + owner | Add GitHub / URL / Confluence source |
+| POST | `/api/sources/upload` | JWT + owner | Upload file (pdf/md/txt/docx) |
+| DELETE | `/api/sources/{id}` | JWT + owner | Remove from MongoDB + delete ChromaDB chunks |
 
 **Ingest**
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| POST | `/ingest/{source_id}` | JWT + owner | Trigger ingestion as BackgroundTask (202); 409 if already indexing |
-| GET | `/ingest/{source_id}/status` | JWT + member | Poll status: pending / indexing / ready / error |
+| POST | `/api/ingest/{source_id}` | JWT + owner | Trigger ingestion as BackgroundTask (202); 409 if already indexing |
+| GET | `/api/ingest/{source_id}/status` | JWT + member | Poll status: pending / indexing / ready / error |
 
 **Chat Sessions**
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| GET | `/chat/sessions` | JWT | List non-archived sessions (newest first, max 50) |
-| POST | `/chat/sessions` | JWT | Create empty session |
-| GET | `/chat/sessions/{id}` | JWT + owner | Full session with messages array |
-| POST | `/chat/sessions/{id}/messages` | JWT + owner | Send message → ChromaDB → Groq → persist → return answer + citations |
-| DELETE | `/chat/sessions/{id}` | JWT + owner | Archive session (soft delete), 204 |
+| GET | `/api/chat/sessions` | JWT | List non-archived sessions (newest first, max 50) |
+| POST | `/api/chat/sessions` | JWT | Create empty session |
+| GET | `/api/chat/sessions/{id}` | JWT + owner | Full session with messages array |
+| POST | `/api/chat/sessions/{id}/messages` | JWT + owner | Send message → ChromaDB → Groq → persist → return answer + citations |
+| DELETE | `/api/chat/sessions/{id}` | JWT + owner | Archive session (soft delete), 204 |
 
 ---
 

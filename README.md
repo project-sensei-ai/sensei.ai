@@ -2,6 +2,12 @@
 
 Permission-aware AI platform that ingests your project sources (GitHub, files, URLs, Confluence) into a knowledge base and answers questions with cited sources. Built with Strands Agents SDK for the AWS hackathon.
 
+![Architecture](docs/assets/architecture.png)
+
+- **[TESTING.md](TESTING.md)** — demo account, questions to try, how to exercise the invite flow
+- **[DEPLOY.md](DEPLOY.md)** — one-container deployment to Fly.io or AWS App Runner
+- **[docs/STRATEGY_AND_BUILD_PLAN.md](docs/STRATEGY_AND_BUILD_PLAN.md)** — market analysis and the road after the MVP
+
 ## Prerequisites
 
 - Python 3.12+
@@ -66,8 +72,18 @@ npm run dev
 ```
 
 - Frontend: http://localhost:5173
-- Backend API: http://localhost:8000
+- Backend API: http://localhost:8000/api
 - API docs (Swagger): http://localhost:8000/docs
+
+### Or run the whole thing in one container
+
+```bash
+docker compose up --build      # builds the SPA, serves everything on :8000
+```
+
+The image builds the React app and FastAPI serves it next to `/api/*`, so a
+deployment is one container and one URL — no CORS, no second service. In dev,
+Vite proxies `/api` straight through, so the paths are identical either way.
 
 ---
 

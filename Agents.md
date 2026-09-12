@@ -88,14 +88,20 @@ Fetches pages from a Confluence space via REST API `/rest/api/content`. Strips H
 Other models available on this key: `openai/gpt-oss-20b`, `qwen/qwen3.8-27b`, `groq/compound`, `allam-2-7b`.  
 **Do not use** `llama-3.1-8b-instant` — returns 404 on this key.
 
-### System Prompt — two-mode
+### System Prompt
 
-The prompt has two distinct modes to avoid both hallucination and over-refusal:
+`SENSEI_SYSTEM_PROMPT` in `agent/agent.py`. It does two jobs: it tells the model
+*when* to reach for the search tool, and it sets the honesty rule.
 
-- **General questions** (greetings, coding help, small-talk): answered freely from model knowledge. The AI does not reference indexed context and does not refuse.
-- **Project questions** (about code, docs, people, architecture): answered only from numbered ChromaDB context passages. Every claim is cited inline with `[N]`. If context is insufficient, the AI says so — it never fabricates.
+- **Project questions** — code, architecture, team, commits, PRs, issues, docs,
+  decisions — must go through `search_project_docs`. Claims are cited inline with
+  the source label, e.g. `[my-repo]`. If nothing relevant comes back, the agent
+  says so rather than inventing project detail.
+- **General questions** — greetings, ordinary programming help — are answered
+  directly, without a tool call.
 
-The original single-mode prompt refused all general questions ("I don't have that in the knowledge index"). That was replaced.
+The split exists because a single-mode prompt fails in one of two ways: index-only
+prompts refuse to say hello, and unconstrained prompts fabricate project facts.
 
 ### Retrieval
 
@@ -104,7 +110,11 @@ ChromaDB `collection.query(query_texts=[question], n_results=min(5, count))`.
 - Embedder: sentence-transformers `all-MiniLM-L6-v2` (default ChromaDB embedder)
 - Distance metric: cosine
 - Score returned to frontend: `1 − distance` (1.0 = perfect match)
-- Citations deduplicated by source label before returning to the frontend
+- Citations deduplicated by source label across **every tool call in a turn**, not
+  just within one call. The agent loop usually calls `search_project_docs` three
+  or four times per question; per-call dedup meant the same document came back
+  once per call. The `seen_labels` set lives in the tool factory closure so it
+  spans the whole turn, and `index` is assigned from the running total.
 
 Collection name per workspace: `ws_{workspace_id}`.
 
@@ -174,18 +184,27 @@ Frontend polls `GET /ingest/{source_id}/status` every 4 seconds until `ready` or
 
 ## Chat Pipeline (code flow)
 
+The route does not run a retrieval pipeline of its own — it hands the question to
+the Strands agent loop and lets the agent decide whether and how often to search.
+
 ```
-POST /chat/sessions/{session_id}/messages  {question}
-  → auth + session ownership check
+POST /api/chat/sessions/{session_id}/messages  {question}
+  → auth + membership + session ownership check
         ↓
-  collection.query(query_texts=[question], n_results=5)
-  on ws_{workspace_id}
+  build_agent(workspace_id, chroma, session_manager)     [agent/agent.py]
+    ├─ model  ← LLM_BACKEND: BedrockModel | Groq | Ollama
+    ├─ tools  ← make_search_tool(workspace_id, chroma)
+    │            (+ search_knowledge_base when BEDROCK_KB_ID is set)
+    └─ session_manager ← S3SessionManager when S3_SESSION_BUCKET is set
         ↓
-  build numbered context passages
-  deduplicate citations by source label
+  asyncio.to_thread(agent, question)      Agent.__call__ is synchronous
         ↓
-  Groq API — openai/gpt-oss-120b
-  two-mode system prompt + context + question
+  ── the agent loop ──────────────────────────────────
+     the model decides which tools to call, and may call
+     search_project_docs several times with different queries
+     before it has enough to answer
+     each call appends deduplicated citations to `captured`
+  ────────────────────────────────────────────────────
         ↓
   MongoDB $push [user_msg, ai_msg]
   $set title from first message if session was empty

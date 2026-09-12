@@ -1,0 +1,48 @@
+# Fly.io deployment. Build and ship with:
+#   fly launch --no-deploy --copy-config    (first time; pick a name and region)
+#   fly volume create chroma_data --size 1 --region <your-region>
+#   fly secrets set MONGO_DB=... JWT_SECRET=... GROQ_API_KEY=...
+#   fly deploy --build-arg VITE_GOOGLE_CLIENT_ID=<optional>
+#
+# After the first deploy, point invite links at the real host:
+#   fly secrets set FRONTEND_ORIGIN=https://<app>.fly.dev
+
+app = "sensei"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "8000"
+  STATIC_DIR = "/app/static"
+  CHROMA_PERSIST_DIR = "/data/chroma"
+  MONGO_DB_NAME = "sensei"
+  LLM_BACKEND = "groq"
+  DEBUG = "false"
+
+# The vector store must outlive a redeploy, or every source needs re-ingesting.
+[[mounts]]
+  source = "chroma_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  # Keep one machine warm: a cold start has to load the embedding model.
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    grace_period = "45s"
+    interval = "30s"
+    timeout = "5s"
+    method = "GET"
+    path = "/health"
+
+[[vm]]
+  # chromadb + sentence-transformers need headroom; 512 MB will OOM.
+  memory = "2gb"
+  cpu_kind = "shared"
+  cpus = 2

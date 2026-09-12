@@ -424,6 +424,10 @@ def make_search_tool(workspace_id: str, chroma_client):
     from db.chroma import get_workspace_collection
 
     captured: list[dict] = []
+    # Dedup lives in the factory closure, not the call: the agent loop calls this
+    # tool several times per question, and per-call dedup let the same document
+    # come back once per call.
+    seen_labels: set[str] = set()
 
     @tool
     def search_project_docs(query: str) -> str:
@@ -453,7 +457,6 @@ def make_search_tool(workspace_id: str, chroma_client):
             return "No relevant content found for this query."
 
         passages: list[str] = []
-        seen_labels: set[str] = set()
         for i, (doc, meta, dist) in enumerate(zip(docs, metadatas, distances)):
             label = (
                 meta.get("source_label") or meta.get("repo") or
@@ -464,7 +467,7 @@ def make_search_tool(workspace_id: str, chroma_client):
             if label not in seen_labels:
                 seen_labels.add(label)
                 captured.append({
-                    "index": i + 1,
+                    "index": len(captured) + 1,
                     "source_label": label,
                     "excerpt": doc[:250] + ("…" if len(doc) > 250 else ""),
                     "score": score,
