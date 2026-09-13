@@ -136,6 +136,15 @@ export default function Chat() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, streaming, streamingText])
 
+  // Landing on /chat with history but no selection showed a zero-state asking
+  // you to start a conversation you had already started. Open the most recent
+  // one instead; the empty state is for people who genuinely have none.
+  useEffect(() => {
+    if (activeSessionId) return
+    const latest = sessionsData?.sessions?.[0]
+    if (latest) setActiveSessionId(latest.id)
+  }, [sessionsData, activeSessionId])
+
   async function handleNewChat() {
     const res = await createSession().unwrap()
     setActiveSessionId(res.session.id)
