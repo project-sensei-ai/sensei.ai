@@ -106,7 +106,9 @@ def _agent(system_prompt: str, tools: list | None = None) -> Agent:
         model=_build_model(background=True),
         tools=tools or [],
         system_prompt=system_prompt,
-        retry_strategy=ModelRetryStrategy(max_attempts=3, initial_delay=2, max_delay=8),
+        # Background work can afford to wait out a per-minute limit; a person
+        # in chat cannot, which is why the chat agent retries less patiently.
+        retry_strategy=ModelRetryStrategy(max_attempts=5, initial_delay=6, max_delay=45),
     )
 
 

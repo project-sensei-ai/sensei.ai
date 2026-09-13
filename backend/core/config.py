@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     # Tried in order when a model's daily quota is exhausted. Each Groq model
     # has its own quota, so the product keeps working through a demo day on a
     # free key rather than going dark at the first "tokens per day" error.
-    GROQ_FALLBACK_MODELS: str = "openai/gpt-oss-120b,qwen/qwen3.8-27b,qwen/qwen3.6-27b,openai/gpt-oss-20b"
+    GROQ_FALLBACK_MODELS: str = "qwen/qwen3.8-27b,openai/gpt-oss-120b,qwen/qwen3.6-27b,openai/gpt-oss-20b"
     # How long a project's research findings stay reusable before the agent
     # goes and looks again.
     RESEARCH_TTL_HOURS: int = 24
