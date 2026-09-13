@@ -305,20 +305,35 @@ The agent decides *when* to call each tool based on the question.
 
 ### Memory
 
-The `MemoryManager` persists knowledge across sessions:
+Two kinds, both real:
 
-- **Project Store** — indexed docs, code, decisions per workspace
-- **Injection** — relevant context auto-injected into prompts
-- **Extraction** — new facts captured from conversations
+- **Project memory** — sources chunked and embedded into a per-workspace
+  ChromaDB collection, plus cached research findings reused across briefs.
+- **Conversation memory** — `S3SessionManager` per chat session, when
+  `S3_SESSION_BUCKET` is configured.
+
+There is no `MemoryManager` class; an earlier version of this document described
+one that was never built.
 
 ### Streaming
 
+`POST /api/chat/sessions/{id}/stream` returns server-sent events: each tool call
+as it starts, then the answer token by token, then the citations.
+
 ```python
-async def chat_stream(message: str):
-    async for event in agent.stream_async(message):
-        if "text" in event:
-            yield event["text"]
+async for chunk in agent.stream_async(question):
+    tool = chunk.get("current_tool_use")      # {toolUseId, name, input}
+    if tool and tool["toolUseId"] not in announced:
+        yield sse({"type": "tool", "label": TOOL_NARRATION[tool["name"]]})
+    if chunk.get("data"):                      # a text delta
+        yield sse({"type": "text", "delta": chunk["data"]})
 ```
+
+Tool calls are announced once per invocation rather than once per streamed
+fragment of their arguments, and narrated in words rather than function names —
+"Searching the project's documents", not `search_project_docs`.
+
+The non-streaming `POST .../messages` endpoint remains for API clients.
 
 ---
 

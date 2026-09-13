@@ -8,7 +8,6 @@ import {
   useCreateChatSessionMutation,
   useGetChatSessionQuery,
   useArchiveChatSessionMutation,
-  useSendMessageMutation,
   type ChatCitation,
   type ChatMessage,
 } from '@/services/onboardingApi'
@@ -105,16 +104,22 @@ export default function Chat() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
   const [input, setInput] = useState('')
   const [optimisticMessages, setOptimisticMessages] = useState<(ChatMessage & { error?: boolean })[]>([])
+  // What the agent is doing right now, and what it has said so far. Both live
+  // only while a stream is open; once it closes the message is persisted and
+  // comes back through the session query like any other.
+  const [streamingText, setStreamingText] = useState('')
+  const [toolTrail, setToolTrail] = useState<string[]>([])
+  const [streaming, setStreaming] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
   const { data: sessionsData, isLoading: sessionsLoading } = useListChatSessionsQuery()
-  const { data: sessionData } = useGetChatSessionQuery(activeSessionId ?? '', {
-    skip: !activeSessionId,
-  })
+  const { data: sessionData, refetch: refetchSession } = useGetChatSessionQuery(
+    activeSessionId ?? '',
+    { skip: !activeSessionId },
+  )
   const [createSession, { isLoading: creating }] = useCreateChatSessionMutation()
   const [archiveSession] = useArchiveChatSessionMutation()
-  const [sendMessage, { isLoading: sending }] = useSendMessageMutation()
 
   const sessions = sessionsData?.sessions ?? []
   const storedMessages: (ChatMessage & { error?: boolean })[] = sessionData?.session.messages ?? []
@@ -129,7 +134,7 @@ export default function Chat() {
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, sending])
+  }, [messages, streaming, streamingText])
 
   async function handleNewChat() {
     const res = await createSession().unwrap()
@@ -150,7 +155,7 @@ export default function Chat() {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     const question = input.trim()
-    if (!question || sending) return
+    if (!question || streaming) return
 
     let sessionId = activeSessionId
 
@@ -171,22 +176,70 @@ export default function Chat() {
     }
     setOptimisticMessages((prev) => [...prev, userMsg])
 
+    setStreaming(true)
+    setStreamingText('')
+    setToolTrail([])
+
     try {
-      const res = await sendMessage({ sessionId, question }).unwrap()
-      // Session query will refetch and replace optimistic messages
-      const aiMsg: ChatMessage & { error?: boolean } = {
-        role: 'assistant',
-        content: res.answer,
-        citations: res.citations,
-        created_at: new Date().toISOString(),
+      const res = await fetch(`/api/chat/sessions/${sessionId}/stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ question }),
+      })
+      if (!res.ok || !res.body) throw new Error(`Request failed (${res.status})`)
+
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let answer = ''
+      let citations: ChatCitation[] = []
+      let failed: string | null = null
+
+      // Server-sent events arrive as `data: {...}\n\n`, and a chunk can split
+      // an event in half — so hold the remainder until the next read.
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const parts = buffer.split('\n\n')
+        buffer = parts.pop() ?? ''
+        for (const part of parts) {
+          const line = part.split('\n').find((l) => l.startsWith('data: '))
+          if (!line) continue
+          const event = JSON.parse(line.slice(6))
+          if (event.type === 'tool') {
+            setToolTrail((prev) => [...prev, event.label])
+          } else if (event.type === 'text') {
+            answer += event.delta
+            setStreamingText(answer)
+          } else if (event.type === 'done') {
+            citations = event.citations ?? []
+          } else if (event.type === 'error') {
+            failed = event.message
+          }
+        }
       }
-      setOptimisticMessages((prev) => [...prev, aiMsg])
+
+      setOptimisticMessages((prev) => [...prev, {
+        role: 'assistant',
+        content: failed ?? answer,
+        citations,
+        error: !!failed,
+        created_at: new Date().toISOString(),
+      }])
+      refetchSession?.()
     } catch (err: any) {
-      const detail = err?.data?.detail || 'Something went wrong. Please try again.'
-      setOptimisticMessages((prev) => [
-        ...prev,
-        { role: 'assistant', content: detail, error: true, created_at: new Date().toISOString() },
-      ])
+      setOptimisticMessages((prev) => [...prev, {
+        role: 'assistant',
+        content: err?.message || 'Something went wrong. Please try again.',
+        error: true,
+        created_at: new Date().toISOString(),
+      }])
+    } finally {
+      setStreaming(false)
+      setStreamingText('')
+      setToolTrail([])
     }
 
     inputRef.current?.focus()
@@ -271,7 +324,7 @@ export default function Chat() {
             <>
               {/* Message list */}
               <div className="flex-1 overflow-y-auto flex flex-col gap-4 py-4">
-                {messages.length === 0 && !sending && (
+                {messages.length === 0 && !streaming && (
                   <div className="flex items-center justify-center h-full">
                     <p className="text-sm text-muted-foreground">Send a message to get started.</p>
                   </div>
@@ -279,7 +332,39 @@ export default function Chat() {
                 {messages.map((msg, i) => (
                   <MessageBubble key={i} msg={msg} />
                 ))}
-                {sending && <TypingIndicator />}
+
+                {/* The agent working, rather than a spinner hiding it. */}
+                {streaming && (
+                  <div className="flex flex-col gap-2">
+                    {toolTrail.length > 0 && (
+                      <div className="flex flex-col gap-1">
+                        {toolTrail.map((label, i) => (
+                          <p
+                            key={i}
+                            className="flex items-center gap-2 text-xs text-muted-foreground"
+                          >
+                            <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary/60" />
+                            {label}
+                            {i === toolTrail.length - 1 && !streamingText && (
+                              <span className="animate-pulse">…</span>
+                            )}
+                          </p>
+                        ))}
+                      </div>
+                    )}
+                    {streamingText ? (
+                      <MessageBubble
+                        msg={{
+                          role: 'assistant',
+                          content: streamingText,
+                          created_at: new Date().toISOString(),
+                        }}
+                      />
+                    ) : (
+                      toolTrail.length === 0 && <TypingIndicator />
+                    )}
+                  </div>
+                )}
                 <div ref={bottomRef} />
               </div>
 
@@ -296,15 +381,15 @@ export default function Chat() {
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={handleKeyDown}
-                  disabled={sending}
+                  disabled={streaming}
                 />
                 <Button
                   type="submit"
                   size="icon"
                   className="rounded-xl shrink-0 h-10 w-10"
-                  disabled={!input.trim() || sending}
+                  disabled={!input.trim() || streaming}
                 >
-                  {sending ? <Spinner className="h-4 w-4" /> : <Send className="h-4 w-4" />}
+                  {streaming ? <Spinner className="h-4 w-4" /> : <Send className="h-4 w-4" />}
                 </Button>
               </form>
             </>

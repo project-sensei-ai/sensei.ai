@@ -1,9 +1,11 @@
 """Chat routes — session management + Strands Agent cited Q&A."""
 import asyncio
+import json
 from datetime import datetime, timezone
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from agent.agent import build_agent, make_session_manager
@@ -112,3 +114,99 @@ async def send_message(
         },
     )
     return {"answer": answer, "citations": citations}
+
+
+# ── Streaming ─────────────────────────────────────────────────────────────────
+#
+# The non-streaming route above answers in one lump, which means a spinner for
+# up to forty seconds while the agent searches, reads and reasons. All of that
+# work is interesting — it is the evidence that there is an agent here at all —
+# and hiding it behind a spinner throws it away.
+
+# What each tool is doing, said the way a person would say it.
+TOOL_NARRATION = {
+    "search_project_docs": "Searching the project's documents",
+    "list_project_knowledge": "Taking stock of what's indexed",
+    "search_knowledge_base": "Searching uploaded files",
+}
+
+
+def _sse(event: dict) -> str:
+    return f"data: {json.dumps(event)}\n\n"
+
+
+@router.post("/sessions/{session_id}/stream")
+async def stream_message(
+    session_id: str,
+    body: ChatRequest,
+    request: Request,
+    user=Depends(get_current_user),
+    db=Depends(get_db),
+):
+    """
+    Answer over server-sent events: tool calls as they happen, then the answer
+    token by token, then citations.
+    """
+    session = await _require_session(session_id, user, db)
+    chroma = get_chroma(request)
+
+    async def events():
+        sm = make_session_manager(session_id)
+        agent, captured = build_agent(session["workspace_id"], chroma, session_manager=sm)
+        answer_parts: list[str] = []
+        announced: set[str] = set()
+
+        try:
+            async for chunk in agent.stream_async(body.question):
+                # A tool starting. Announced once per invocation, not once per
+                # streamed fragment of its arguments.
+                tool = chunk.get("current_tool_use")
+                if tool and tool.get("toolUseId") not in announced:
+                    announced.add(tool["toolUseId"])
+                    name = tool.get("name", "")
+                    yield _sse({
+                        "type": "tool",
+                        "name": name,
+                        "label": TOOL_NARRATION.get(name, f"Using {name}"),
+                    })
+
+                text = chunk.get("data")
+                if text:
+                    answer_parts.append(text)
+                    yield _sse({"type": "text", "delta": text})
+
+            answer = "".join(answer_parts)
+
+            now = datetime.now(timezone.utc).isoformat()
+            is_first = len(session.get("messages", [])) == 0
+            title_update = (
+                {"title": body.question[:60] + ("…" if len(body.question) > 60 else "")}
+                if is_first else {}
+            )
+            await db.chat_sessions.update_one(
+                {"_id": session_id},
+                {
+                    "$set": {"updated_at": datetime.now(timezone.utc), **title_update},
+                    "$push": {"messages": {"$each": [
+                        {"role": "user", "content": body.question, "created_at": now},
+                        {"role": "assistant", "content": answer,
+                         "citations": captured, "created_at": now},
+                    ]}},
+                },
+            )
+            yield _sse({"type": "done", "citations": captured})
+
+        except Exception as exc:
+            # The stream has already started, so an HTTP error code is no longer
+            # available — the failure has to travel as an event.
+            yield _sse({"type": "error", "message": str(exc)[:300]})
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",   # stop proxies holding the stream back
+        },
+    )
