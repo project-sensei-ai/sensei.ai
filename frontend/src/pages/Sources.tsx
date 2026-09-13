@@ -88,11 +88,11 @@ function SourceCard({ source, canManage }: { source: Source; canManage: boolean 
           {cfg.icon} {cfg.label}
         </Badge>
 
-        {canManage && (source.status === 'pending' || source.status === 'error') && (
+        {canManage && (
           <Button size="sm" variant="outline" className="h-7 gap-1 text-xs"
             disabled={ingesting} onClick={() => triggerIngest(source.id)}>
             <RefreshCw className={`h-3 w-3 ${ingesting ? 'animate-spin' : ''}`} />
-            Ingest
+            {source.status === 'ready' ? 'Re-index' : 'Ingest'}
           </Button>
         )}
 
