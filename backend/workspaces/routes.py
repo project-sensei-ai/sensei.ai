@@ -3,9 +3,10 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from pydantic import BaseModel, EmailStr, Field
 
+from agent.brief import generate_brief
 from auth.deps import get_current_user
 from core import mailer
 from core.config import settings
@@ -160,6 +161,8 @@ async def list_members(user=Depends(get_current_user), db=Depends(get_db)):
 @router.post("/members", status_code=status.HTTP_201_CREATED)
 async def add_members(
     body: AddMembersIn,
+    request: Request,
+    background_tasks: BackgroundTasks,
     user=Depends(get_current_user),
     db=Depends(get_db),
 ):
@@ -231,6 +234,17 @@ async def add_members(
             "expires_at": now + timedelta(days=INVITE_TTL_DAYS),
             "accepted_at": None,
         })
+
+        # Nobody asked for this. Adding a person is the event; the agent goes and
+        # researches the project for them so the brief is waiting when they
+        # first log in.
+        background_tasks.add_task(
+            generate_brief,
+            request.app.state.mongo_db,
+            request.app.state.chroma_client,
+            workspace["_id"],
+            member_user["_id"],
+        )
 
         emailed = await mailer.send_invite(email, workspace["name"], inviter, _invite_url(token))
         results.append({

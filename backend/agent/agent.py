@@ -42,6 +42,35 @@ Do NOT call the tool for general programming questions, definitions, or topics c
 """
 
 
+def _build_model():
+    """
+    The configured model, for any agent in the system.
+
+    Shared so the chat agent and the background agents that write briefs cannot
+    drift onto different backends — one LLM_BACKEND flag moves all of them.
+    """
+    if settings.LLM_BACKEND == "bedrock":
+        from strands.models.bedrock import BedrockModel
+        return BedrockModel(
+            model_id=settings.BEDROCK_MODEL_ID,
+            region_name=settings.AWS_REGION,
+        )
+    if settings.LLM_BACKEND == "ollama":
+        from strands.models.openai import OpenAIModel
+        return OpenAIModel(
+            model_id=settings.OLLAMA_MODEL,
+            client_args={"api_key": "ollama", "base_url": settings.OLLAMA_BASE_URL},
+        )
+    from strands.models.openai import OpenAIModel
+    return OpenAIModel(
+        model_id="openai/gpt-oss-120b",
+        client_args={
+            "api_key": settings.GROQ_API_KEY,
+            "base_url": "https://api.groq.com/openai/v1",
+        },
+    )
+
+
 def build_agent(workspace_id: str, chroma_client, session_manager=None):
     """
     Build a Strands Agent for the given workspace.
@@ -50,31 +79,7 @@ def build_agent(workspace_id: str, chroma_client, session_manager=None):
     Pass session_manager (e.g. S3SessionManager) to give the agent persistent conversation memory.
     """
     search_tool, captured = make_search_tool(workspace_id, chroma_client)
-
-    if settings.LLM_BACKEND == "bedrock":
-        from strands.models.bedrock import BedrockModel
-        model = BedrockModel(
-            model_id=settings.BEDROCK_MODEL_ID,
-            region_name=settings.AWS_REGION,
-        )
-    elif settings.LLM_BACKEND == "ollama":
-        from strands.models.openai import OpenAIModel
-        model = OpenAIModel(
-            model_id=settings.OLLAMA_MODEL,
-            client_args={
-                "api_key": "ollama",
-                "base_url": settings.OLLAMA_BASE_URL,
-            },
-        )
-    else:  # groq
-        from strands.models.openai import OpenAIModel
-        model = OpenAIModel(
-            model_id="openai/gpt-oss-120b",
-            client_args={
-                "api_key": settings.GROQ_API_KEY,
-                "base_url": "https://api.groq.com/openai/v1",
-            },
-        )
+    model = _build_model()
 
     tools = [search_tool, make_inventory_tool(workspace_id, chroma_client)]
     if settings.BEDROCK_KB_ID:

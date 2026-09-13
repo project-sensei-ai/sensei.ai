@@ -54,6 +54,12 @@ async def ensure_indexes(db) -> None:
     await db.members.create_index([("workspace_id", 1), ("status", 1)])
     await db.invites.create_index([("workspace_id", 1), ("email", 1)])
 
+    # Briefs — one per person per workspace
+    try:
+        await db.briefs.create_index([("workspace_id", 1), ("user_id", 1)], unique=True)
+    except Exception as exc:
+        print(f"[DB] brief index warning: {exc}")
+
     # Chat session indexes
     await db.chat_sessions.create_index([("workspace_id", 1), ("archived", 1), ("updated_at", -1)])
     await db.chat_sessions.create_index([("owner_id", 1), ("archived", 1), ("updated_at", -1)])

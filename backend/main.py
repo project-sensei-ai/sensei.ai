@@ -9,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from motor.motor_asyncio import AsyncIOMotorClient
 
 from auth.routes import router as auth_router
+from briefs.routes import router as briefs_router
 from chat.routes import router as chat_router
 from core.config import settings
 from db.database import ensure_indexes
@@ -87,6 +88,7 @@ app.include_router(workspaces_router, prefix=f"{API_PREFIX}/workspaces")
 app.include_router(sources_router, prefix=f"{API_PREFIX}/sources")
 app.include_router(ingest_router, prefix=f"{API_PREFIX}/ingest")
 app.include_router(chat_router, prefix=f"{API_PREFIX}/chat")
+app.include_router(briefs_router, prefix=f"{API_PREFIX}/briefs")
 
 
 def _health() -> dict:

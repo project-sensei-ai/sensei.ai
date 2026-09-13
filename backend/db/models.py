@@ -89,3 +89,18 @@ def serialize_chat_session(doc: dict, include_messages: bool = False) -> dict:
     if include_messages:
         out["messages"] = doc.get("messages", [])
     return out
+
+
+def serialize_brief(doc: dict) -> dict:
+    return {
+        "id": doc["_id"],
+        "workspace_id": doc["workspace_id"],
+        "user_id": doc["user_id"],
+        "person_name": doc.get("person_name"),
+        "person_email": doc.get("person_email"),
+        "status": doc.get("status", "generating"),
+        "brief": doc.get("brief"),
+        "error_message": doc.get("error_message"),
+        "created_at": _iso(doc.get("created_at")),
+        "updated_at": _iso(doc.get("updated_at")),
+    }
