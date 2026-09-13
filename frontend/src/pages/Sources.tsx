@@ -8,6 +8,7 @@ import {
   Loader2,
   Plus,
   RefreshCw,
+  ShieldCheck,
   Trash2,
   Upload,
   X,
@@ -113,7 +114,7 @@ function SourceCard({ source, canManage }: { source: Source; canManage: boolean 
 
 // ── Add-source panel ───────────────────────────────────────────────────────────
 
-type Tab = 'file' | 'url' | 'github'
+type Tab = 'file' | 'url' | 'github' | 'confluence'
 
 interface GithubRepo { full_name: string; description: string | null; private: boolean }
 
@@ -132,6 +133,11 @@ function AddSourcePanel({ onClose }: { onClose: () => void }) {
   const [urlRaw, setUrlRaw] = useState('')
   const [urlBusy, setUrlBusy] = useState(false)
   const [urlErr, setUrlErr] = useState('')
+
+  // Confluence
+  const [conf, setConf] = useState({ base_url: '', email: '', api_token: '', space_key: '' })
+  const [confBusy, setConfBusy] = useState(false)
+  const [confErr, setConfErr] = useState('')
 
   // GitHub
   const [pat, setPat] = useState('')
@@ -214,10 +220,33 @@ function AddSourcePanel({ onClose }: { onClose: () => void }) {
     } finally { setGhBusy(false) }
   }
 
+  async function handleConfluence(e: React.FormEvent) {
+    e.preventDefault()
+    setConfErr('')
+    setConfBusy(true)
+    try {
+      const res = await addSource({
+        type: 'confluence',
+        ...conf,
+        base_url: conf.base_url.trim().replace(/\/+$/, ''),
+        space_key: conf.space_key.trim().toUpperCase(),
+        label: `Confluence: ${conf.space_key.trim().toUpperCase()}`,
+      }).unwrap()
+      await triggerIngest(res.source.id).unwrap().catch(() => {})
+      onClose()
+    } catch (e: any) {
+      setConfErr(e?.data?.detail || 'Failed to connect Confluence')
+    } finally { setConfBusy(false) }
+  }
+
+  const setConfField = (k: keyof typeof conf) => (e: React.ChangeEvent<HTMLInputElement>) =>
+    setConf((c) => ({ ...c, [k]: e.target.value }))
+
   const TABS: { id: Tab; label: string }[] = [
     { id: 'file', label: 'File Upload' },
     { id: 'url', label: 'URL' },
     { id: 'github', label: 'GitHub' },
+    { id: 'confluence', label: 'Confluence' },
   ]
 
   return (
@@ -353,6 +382,76 @@ function AddSourcePanel({ onClose }: { onClose: () => void }) {
           </Button>
         </form>
       )}
+
+      {/* ── Confluence tab ──
+          The copy matters as much as the fields. An API token authorises as the
+          person who made it, so the agent inherits that account's whole view of
+          the site. Naming a space narrows what Sensei *reads*, not what the
+          token *could* read — and saying so plainly is the point. */}
+      {tab === 'confluence' && (
+        <form onSubmit={handleConfluence} className="flex flex-col gap-3">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="flex flex-col gap-1.5 sm:col-span-2">
+              <label className="text-xs font-medium">Confluence site</label>
+              <Input placeholder="https://your-org.atlassian.net/wiki"
+                value={conf.base_url} onChange={setConfField('base_url')} required disabled={confBusy} />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-medium">Account email</label>
+              <Input type="email" placeholder="agent@your-org.com"
+                value={conf.email} onChange={setConfField('email')} required disabled={confBusy} />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-medium">Space key</label>
+              <Input placeholder="ENG" value={conf.space_key}
+                onChange={setConfField('space_key')} required disabled={confBusy} />
+            </div>
+            <div className="flex flex-col gap-1.5 sm:col-span-2">
+              <label className="text-xs font-medium">API token</label>
+              <Input type="password" placeholder="Paste the token"
+                value={conf.api_token} onChange={setConfField('api_token')} required disabled={confBusy} />
+              <p className="text-xs text-muted-foreground">
+                Create one at{' '}
+                <a href="https://id.atlassian.com/manage-profile/security/api-tokens"
+                   target="_blank" rel="noreferrer"
+                   className="underline underline-offset-2 hover:text-foreground">
+                  id.atlassian.com → Security → API tokens
+                </a>. Atlassian expires tokens after a year, so this needs rotating.
+              </p>
+            </div>
+          </div>
+
+          <div className="rounded-lg border bg-muted/30 p-3 text-xs leading-relaxed">
+            <p className="flex items-center gap-1.5 font-medium text-foreground">
+              <ShieldCheck className="h-3.5 w-3.5" /> What this grants
+            </p>
+            <ul className="mt-2 flex flex-col gap-1 text-muted-foreground">
+              <li>
+                <span className="text-foreground">Sensei reads:</span> pages in the{' '}
+                <span className="font-mono">{conf.space_key.trim().toUpperCase() || 'SPACE'}</span>{' '}
+                space only. Nothing else is fetched or indexed.
+              </li>
+              <li>
+                <span className="text-foreground">The token could reach:</span> everything
+                that account can see in Confluence. A token authorises as its owner —
+                Atlassian has no way to narrow it to one space.
+              </li>
+              <li>
+                <span className="text-foreground">So:</span> use a dedicated Atlassian
+                account invited only to the spaces this project needs. Then the limit
+                is enforced by Confluence, not just by us.
+              </li>
+            </ul>
+          </div>
+
+          {confErr && <p className="text-xs text-destructive">{confErr}</p>}
+          <Button type="submit" size="sm"
+            disabled={confBusy || !conf.base_url || !conf.email || !conf.api_token || !conf.space_key}>
+            {confBusy ? <><Loader2 className="h-4 w-4 animate-spin mr-1" /> Connecting…</> : 'Connect space'}
+          </Button>
+        </form>
+      )}
+
     </div>
   )
 }

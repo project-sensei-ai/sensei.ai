@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useAddSourceMutation, useUploadFileMutation, useTriggerIngestMutation, type Source } from '@/services/onboardingApi'
-import { CheckCircle, Clock, Loader2, AlertCircle } from 'lucide-react'
+import { CheckCircle, Clock, Loader2, AlertCircle, ShieldCheck } from 'lucide-react'
 
 type Tab = 'github' | 'file' | 'url' | 'confluence'
 
@@ -389,8 +389,41 @@ function ConfluenceTab({ onAdd, addSource }: any) {
         <div className="flex flex-col gap-1.5 col-span-2">
           <Label>API Token</Label>
           <Input type="password" placeholder="Your Confluence API token" value={form.api_token} onChange={set('api_token')} required disabled={busy} />
+          <p className="text-xs text-muted-foreground">
+            Create one at{' '}
+            <a href="https://id.atlassian.com/manage-profile/security/api-tokens"
+               target="_blank" rel="noreferrer"
+               className="underline underline-offset-2 hover:text-foreground">
+              id.atlassian.com → Security → API tokens
+            </a>. Atlassian expires tokens after a year.
+          </p>
         </div>
       </div>
+
+      {/* Same disclosure as the Sources page — an owner should be told what a
+          token actually authorises before they paste one in, not afterwards. */}
+      <div className="rounded-lg border bg-muted/30 p-3 text-xs leading-relaxed">
+        <p className="flex items-center gap-1.5 font-medium text-foreground">
+          <ShieldCheck className="h-3.5 w-3.5" /> What this grants
+        </p>
+        <ul className="mt-2 flex flex-col gap-1 text-muted-foreground">
+          <li>
+            <span className="text-foreground">Sensei reads:</span> pages in the{' '}
+            <span className="font-mono">{form.space_key.trim().toUpperCase() || 'SPACE'}</span>{' '}
+            space only.
+          </li>
+          <li>
+            <span className="text-foreground">The token could reach:</span> anything
+            that account can see — a token authorises as its owner, and Atlassian
+            cannot narrow it to one space.
+          </li>
+          <li>
+            <span className="text-foreground">So:</span> use an account invited only
+            to the spaces this project needs.
+          </li>
+        </ul>
+      </div>
+
       {err && <p className="text-sm text-destructive">{err}</p>}
       <Button type="submit" disabled={busy || !form.base_url || !form.email || !form.api_token || !form.space_key} size="sm">
         {busy ? 'Adding…' : 'Add Confluence space'}
