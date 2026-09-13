@@ -42,6 +42,14 @@ GRANTS = {
         "revoke": "Delete this source, or revoke the token at id.atlassian.com",
         "improve": "A dedicated Atlassian account invited only to this space makes the limit one Confluence enforces, not one we promise",
     },
+    "jira": {
+        "credential": "Atlassian API token",
+        "ceiling": "Everything the token's Atlassian account can see across the site",
+        "floor": "Issues in the one project named here",
+        "cannot": ["Write or transition issues", "Projects other than the one named", "Confluence pages"],
+        "revoke": "Delete this source, or revoke the token at id.atlassian.com",
+        "improve": "A dedicated Atlassian account with access to only this project makes the limit one Jira enforces, not one we promise",
+    },
     "url": {
         "credential": "None",
         "ceiling": "Public web pages only",

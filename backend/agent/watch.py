@@ -73,7 +73,7 @@ def _fingerprint(docs: list[dict]) -> dict[str, str]:
 
 
 async def _fetch(source: dict) -> list[dict]:
-    from agent.tools import fetch_confluence, fetch_github, fetch_urls
+    from agent.tools import fetch_confluence, fetch_github, fetch_urls, fetch_jira
     secret = secrets.decrypt_dict(source.get("config_secret"))
     cfg = source.get("config", {})
     if source["type"] == "github":
@@ -84,6 +84,11 @@ async def _fetch(source: dict) -> list[dict]:
         return await fetch_confluence(
             base_url=cfg["base_url"], email=cfg["email"],
             api_token=secret.get("api_token", ""), space_key=cfg["space_key"],
+        )
+    if source["type"] == "jira":
+        return await fetch_jira(
+            base_url=cfg["base_url"], email=cfg["email"],
+            api_token=secret.get("api_token", ""), project_key=cfg["project_key"],
         )
     return []          # uploaded files cannot change underneath us
 

@@ -432,6 +432,178 @@ async def fetch_confluence(base_url: str, email: str, api_token: str, space_key:
     return results
 
 
+# Jira issue fields arrive as ADF (Atlassian Document Format) JSON — a tree of
+# text/mark/block nodes — which is not searchable text on its own. Flatten only
+# the nodes that carry words; block nodes end their snippet with a newline so
+# consecutive paragraphs survive as separate lines.
+_BLOCK_NODES = {
+    "paragraph", "heading", "listItem", "codeBlock", "blockquote", "rule",
+    "panel", "bulletList", "orderedList", "doc", "tableRow", "tableHeader",
+    "tableCell",
+}
+
+
+def _adf_text(node) -> str:
+    if isinstance(node, list):
+        return "".join(_adf_text(n) for n in node)
+    if not isinstance(node, dict):
+        return ""
+    kind = node.get("type")
+    if kind == "text":
+        return node.get("text", "")
+    if kind == "hardBreak":
+        return "\n"
+    if kind in ("mention", "emoji", "status", "date"):
+        # Jira puts display text on the node itself, not in a nested text node.
+        return node.get("text") or (node.get("attrs") or {}).get("text") or ""
+    if kind == "rule":
+        return "\n"
+    body = _adf_text(node.get("content"))
+    if kind in _BLOCK_NODES:
+        return body.rstrip("\n") + "\n"
+    return body
+
+
+async def _issues_via_board(client, base: str, project_key: str, fields: str) -> list[dict]:
+    """
+    Confluence boards read issues without the JQL search index. Some brand-new
+    cloud sites serve 410 Gone on /rest/api/3/search until the index is built;
+    the agile board endpoint is the one other source that still lists issues.
+    """
+    boards = await client.get(
+        f"{base}/rest/agile/1.0/board",
+        params={"projectKeyOrId": project_key},
+    )
+    boards.raise_for_status()
+
+    issues: list[dict] = []
+    for board in boards.json().get("values", []):
+        start_at = 0
+        while len(issues) < 300:
+            resp = await client.get(
+                f"{base}/rest/agile/1.0/board/{board['id']}/issue",
+                params={"fields": fields, "maxResults": 50, "startAt": start_at},
+            )
+            resp.raise_for_status()
+            payload = resp.json()
+            batch = payload.get("issues", [])
+            issues.extend(batch)
+            if not batch or start_at + len(batch) >= (payload.get("total") or len(batch)):
+                break
+            start_at += len(batch)
+
+    # An issue can sit on several boards; keep the first copy per key.
+    seen: set[str] = set()
+    deduped: list[dict] = []
+    for issue in issues:
+        if issue.get("key", "") not in seen:
+            seen.add(issue.get("key", ""))
+            deduped.append(issue)
+    return deduped
+
+
+async def fetch_jira(base_url: str, email: str, api_token: str, project_key: str) -> list[dict]:
+    """
+    Fetch issues from a Jira Cloud project. Same Atlassian identity as
+    Confluence, pointed at /rest/api/3 instead.
+
+    Each issue becomes one document (summary, status, description); comments
+    become their own documents so "what were people saying on PROJ-42" is
+    searchable independently of the ticket body.
+    """
+    import base64
+    import re as _re
+
+    creds = base64.b64encode(f"{email}:{api_token}".encode()).decode()
+    headers = {"Authorization": f"Basic {creds}", "Accept": "application/json"}
+    base = base_url.rstrip("/")
+    key = project_key.strip().upper()
+    fields = "summary,description,status,priority,labels,assignee,comment,created,updated"
+
+    issues: list[dict] = []
+    async with httpx.AsyncClient(headers=headers, timeout=30) as client:
+        try:
+            start_at = 0
+            # One page of 50 silently truncated bigger projects, same cap as Confluence.
+            while len(issues) < 300:
+                resp = await client.get(f"{base}/rest/api/3/search", params={
+                    "jql": f"project = {key}",
+                    "fields": fields,
+                    "maxResults": 50,
+                    "startAt": start_at,
+                })
+                resp.raise_for_status()
+                payload = resp.json()
+                batch = payload.get("issues", [])
+                issues.extend(batch)
+                if not batch or start_at + len(batch) >= (payload.get("total") or len(batch)):
+                    break
+                start_at += len(batch)
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code not in (410, 404):
+                raise
+            # New sites can serve 410 Gone on /search until the index builds;
+            # the agile board API lists issues without it.
+            issues = await _issues_via_board(client, base, key, fields)
+
+    results: list[dict] = []
+    for issue in issues:
+        ikey = issue.get("key", "")
+        f = issue.get("fields") or {}
+        summary = f.get("summary", "")
+        status = (f.get("status") or {}).get("name", "")
+        priority = (f.get("priority") or {}).get("name", "")
+        assignee = (f.get("assignee") or {}).get("displayName", "")
+        labels = ", ".join(f.get("labels") or [])
+        permalink = f"{base}/browse/{ikey}"
+        if summary:
+            title = f"{ikey}: {summary}"
+        else:
+            title = ikey
+
+        parts = [title, f"Status: {status}"]
+        if priority:
+            parts.append(f"Priority: {priority}")
+        if assignee:
+            parts.append(f"Assignee: {assignee}")
+        if labels:
+            parts.append(f"Labels: {labels}")
+        desc = _re.sub(r"\n{3,}", "\n\n", _adf_text(f.get("description"))).strip()
+        if desc:
+            parts.append(f"Description:\n{desc}")
+
+        results.append({
+            "content": "\n".join(parts),
+            "metadata": {
+                "source": "jira",
+                "title": title,
+                "issue_key": ikey,
+                "status": status,
+                "data_type": "issue",
+                "url": permalink,
+            },
+        })
+
+        for comment in (f.get("comment") or {}).get("comments", []):
+            body = _re.sub(r"\n{3,}", "\n\n", _adf_text(comment.get("body"))).strip()
+            if not body:
+                continue
+            author = (comment.get("author") or {}).get("displayName", "")
+            results.append({
+                "content": f"{author}: {body}" if author else body,
+                "metadata": {
+                    "source": "jira",
+                    "title": f"{ikey} comment",
+                    "issue_key": ikey,
+                    "status": status,
+                    "data_type": "comment",
+                    "url": permalink,
+                },
+            })
+
+    return results
+
+
 def make_inventory_tool(workspace_id: str, chroma_client, allowed_sources: list[str] | None = None):
     """
     Factory for `list_project_knowledge`.

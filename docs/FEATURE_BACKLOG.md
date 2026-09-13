@@ -62,7 +62,7 @@ without ACLs poisons the permission model for every other one.
 | Connector | Verdict |
 |---|---|
 | **Teams** | Highest value, most setup. Built except the transport. Use resource-specific consent so the team owner's install *is* the grant — it matches the model everything else here follows. Tenant-wide access needs Microsoft's protected-API approval, roughly a week. |
-| **Jira** | Nearly free once Confluence exists — same site, same account, same token, a different endpoint. Answers "what's the status of PROJ-412", which no document can. Currently a colleague's. |
+| **Jira** | ✅ Built — same site, same account, same Atlassian token as Confluence, pointed at `/rest/api/3/search` instead. Indexes an issue per project: summary, status, description, comments. Answers "what's the status of PROJ-412", which no document can. Live status reads (freshness) deliberately skipped — see `docs/JIRA_CONNECTOR_PLAN.md`. |
 | **Slack** | A bot reads only channels it was invited to, which is the cleanest consent story of any connector: the invite is the grant, and removing the bot is the revocation. Currently a colleague's. |
 | **GitHub App** (replacing the PAT) | The biggest security improvement available. Per-repo install, short-lived tokens, webhooks for free, and collaborator lists that make 2.7 possible. It closes the gap between ceiling and floor almost entirely. |
 | **ServiceNow** | The differentiator for IT-services teams, where no single vendor's native AI can see across the client's ITSM and the vendor's Jira. Table API plus ACL evaluation. |

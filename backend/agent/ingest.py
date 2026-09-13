@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 from core import secrets
 from db.chroma import get_workspace_collection
-from agent.tools import fetch_github, fetch_urls, parse_file, fetch_confluence
+from agent.tools import fetch_github, fetch_urls, parse_file, fetch_confluence, fetch_jira
 
 
 # ChromaDB's default embedder (ONNX all-MiniLM-L6-v2) truncates its input at 256
@@ -88,6 +88,16 @@ async def run_ingestion(db, chroma_client, source_id: str) -> None:
                 email=cfg["email"],
                 api_token=secret.get("api_token", ""),
                 space_key=cfg["space_key"],
+            )
+
+        elif source["type"] == "jira":
+            cfg = source["config"]
+            secret = secrets.decrypt_dict(source.get("config_secret"))
+            raw_docs = await fetch_jira(
+                base_url=cfg["base_url"],
+                email=cfg["email"],
+                api_token=secret.get("api_token", ""),
+                project_key=cfg["project_key"],
             )
 
         # Chunk and collect

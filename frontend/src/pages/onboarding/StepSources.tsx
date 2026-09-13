@@ -7,8 +7,9 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useAddSourceMutation, useUploadFileMutation, useTriggerIngestMutation, type Source } from '@/services/onboardingApi'
 import { CheckCircle, Clock, Loader2, AlertCircle, ShieldCheck } from 'lucide-react'
+import FieldHelp from '@/components/FieldHelp'
 
-type Tab = 'github' | 'file' | 'url' | 'confluence'
+type Tab = 'github' | 'file' | 'url' | 'confluence' | 'jira'
 
 interface Props {
   workspaceId: string
@@ -40,6 +41,7 @@ export default function StepSources({ onDone }: Props) {
     { id: 'file', label: 'File Upload' },
     { id: 'url', label: 'URL' },
     { id: 'confluence', label: 'Confluence' },
+    { id: 'jira', label: 'Jira' },
   ]
 
   return (
@@ -70,6 +72,7 @@ export default function StepSources({ onDone }: Props) {
         {tab === 'file' && <FileTab onAdd={afterAdd} uploadFile={uploadFile} />}
         {tab === 'url' && <UrlTab onAdd={afterAdd} addSource={addSource} />}
         {tab === 'confluence' && <ConfluenceTab onAdd={afterAdd} addSource={addSource} />}
+        {tab === 'jira' && <JiraTab onAdd={afterAdd} addSource={addSource} />}
 
         {/* Added sources list */}
         {addedSources.length > 0 && (
@@ -164,7 +167,10 @@ function GithubTab({ onAdd, addSource }: any) {
     <form onSubmit={submit} className="flex flex-col gap-3">
       {/* PAT field + fetch button */}
       <div className="flex flex-col gap-1.5">
-        <Label>Personal Access Token</Label>
+        <Label className="flex items-center gap-1">
+          Personal Access Token
+          <FieldHelp text={'Create at github.com → Settings → Developer settings → Personal access tokens → Tokens (classic)\nNeeds scopes: repo, user, project'} />
+        </Label>
         <div className="flex gap-2">
           <Input
             type="password"
@@ -241,9 +247,9 @@ function GithubTab({ onAdd, addSource }: any) {
       {/* Manual fallback when no repos fetched yet */}
       {repos.length === 0 && !fetching && (
         <div className="flex flex-col gap-1.5">
-          <Label>
-            Repository{' '}
-            <span className="text-muted-foreground text-xs font-normal">or enter manually</span>
+          <Label className="flex items-center gap-1">
+            Repository <span className="text-muted-foreground text-xs font-normal">or enter manually</span>
+            <FieldHelp text="Which repository to index, as owner/repo (e.g. your-org/your-app). Pick from the list above or type it in." />
           </Label>
           <Input
             placeholder="owner/repo"
@@ -335,7 +341,10 @@ function UrlTab({ onAdd, addSource }: any) {
   return (
     <form onSubmit={submit} className="flex flex-col gap-3">
       <div className="flex flex-col gap-1.5">
-        <Label>URLs <span className="text-muted-foreground text-xs">(one per line)</span></Label>
+        <Label className="flex items-center gap-1">
+          URLs <span className="text-muted-foreground text-xs">(one per line)</span>
+          <FieldHelp text="Paste the exact public pages to index — one URL per line. Each must be reachable without a login (it is checked before saving)." />
+        </Label>
         <textarea
           className="border-input bg-background ring-offset-background placeholder:text-muted-foreground focus-visible:ring-ring flex min-h-[100px] w-full rounded-md border px-3 py-2 text-sm focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none disabled:opacity-50"
           placeholder="https://docs.example.com&#10;https://example.com/readme"
@@ -428,6 +437,102 @@ function ConfluenceTab({ onAdd, addSource }: any) {
       {err && <p className="text-sm text-destructive">{err}</p>}
       <Button type="submit" disabled={busy || !form.base_url || !form.email || !form.api_token || !form.space_key} size="sm">
         {busy ? 'Adding…' : 'Add Confluence space'}
+      </Button>
+    </form>
+  )
+}
+
+function JiraTab({ onAdd, addSource }: any) {
+  const [form, setForm] = useState({ base_url: '', email: '', api_token: '', project_key: '' })
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+
+  const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement>) => setForm((f) => ({ ...f, [k]: e.target.value }))
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault()
+    setErr('')
+    setBusy(true)
+    try {
+      const res = await addSource({
+        type: 'jira',
+        ...form,
+        project_key: form.project_key.trim().toUpperCase(),
+        label: `Jira:${form.project_key.trim().toUpperCase()}`,
+      }).unwrap()
+      onAdd(res.source)
+      setForm({ base_url: '', email: '', api_token: '', project_key: '' })
+    } catch (e: any) {
+      setErr(errorMessage(e) || 'Failed to add Jira source')
+    } finally { setBusy(false) }
+  }
+
+  return (
+    <form onSubmit={submit} className="flex flex-col gap-3">
+      <div className="grid grid-cols-2 gap-3">
+        <div className="flex flex-col gap-1.5 col-span-2">
+          <Label className="flex items-center gap-1">
+            Base URL
+            <FieldHelp text="Your site is the root address you log into — everything after the '?' is redirect noise. Example: https://your-org.atlassian.net" />
+          </Label>
+          <Input placeholder="https://your-org.atlassian.net" value={form.base_url} onChange={set('base_url')} required disabled={busy} />
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label className="flex items-center gap-1">
+            Email
+            <FieldHelp text="The Atlassian account email that owns the API token. Sensei authenticates with this same identity." />
+          </Label>
+          <Input type="email" placeholder="you@example.com" value={form.email} onChange={set('email')} required disabled={busy} />
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label className="flex items-center gap-1">
+            Project Key
+            <FieldHelp text="The short uppercase code identifying your Jira project (e.g. PD, SCRUM). Found on the board or in its URL after /projects/. Create one if you have none." />
+          </Label>
+          <Input placeholder="PROJ" value={form.project_key} onChange={set('project_key')} required disabled={busy} />
+        </div>
+        <div className="flex flex-col gap-1.5 col-span-2">
+          <Label className="flex items-center gap-1">
+            API Token
+            <FieldHelp text={'1. Go to id.atlassian.com → Security → API tokens → Create token\n2. Copy it immediately (shown only once)\n3. Paste and pair with the account email above — the token authorises as that exact account'} />
+          </Label>
+          <Input type="password" placeholder="Your Atlassian API token" value={form.api_token} onChange={set('api_token')} required disabled={busy} />
+          <p className="text-xs text-muted-foreground">
+            The same Atlassian token works for both Confluence and Jira. Create one at{' '}
+            <a href="https://id.atlassian.com/manage-profile/security/api-tokens"
+               target="_blank" rel="noreferrer"
+               className="underline underline-offset-2 hover:text-foreground">
+              id.atlassian.com → Security → API tokens
+            </a>. Atlassian expires tokens after a year.
+          </p>
+        </div>
+      </div>
+
+      <div className="rounded-lg border bg-muted/30 p-3 text-xs leading-relaxed">
+        <p className="flex items-center gap-1.5 font-medium text-foreground">
+          <ShieldCheck className="h-3.5 w-3.5" /> What this grants
+        </p>
+        <ul className="mt-2 flex flex-col gap-1 text-muted-foreground">
+          <li>
+            <span className="text-foreground">Sensei reads:</span> issues in the{' '}
+            <span className="font-mono">{form.project_key.trim().toUpperCase() || 'PROJ'}</span>{' '}
+            project only.
+          </li>
+          <li>
+            <span className="text-foreground">The token could reach:</span> anything
+            that account can see — a token authorises as its owner, and Atlassian
+            cannot narrow it to one project.
+          </li>
+          <li>
+            <span className="text-foreground">So:</span> use an account invited only
+            to the projects this work involves.
+          </li>
+        </ul>
+      </div>
+
+      {err && <p className="text-sm text-destructive">{err}</p>}
+      <Button type="submit" disabled={busy || !form.base_url || !form.email || !form.api_token || !form.project_key} size="sm">
+        {busy ? 'Adding…' : 'Add Jira project'}
       </Button>
     </form>
   )

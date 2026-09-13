@@ -51,8 +51,9 @@ class ConfluenceSourceIn(BaseModel):
         looking at, not the site root, so trim a full page URL down to the site:
             https://x.atlassian.net/wiki/spaces/ENG/pages/393218/Some+Doc
                  -> https://x.atlassian.net/wiki
+        Redirect URLs carry query strings (`?continue=...`) — drop those too.
         """
-        v = v.strip().rstrip("/")
+        v = v.strip().split("#")[0].split("?")[0].rstrip("/")
         if not v.startswith(("http://", "https://")):
             raise ValueError(
                 "Confluence site must be a URL, like https://your-org.atlassian.net/wiki "
@@ -62,6 +63,30 @@ class ConfluenceSourceIn(BaseModel):
         idx = v.find(marker + "/")
         if idx != -1:
             v = v[: idx + len(marker)]
+        return v
+
+
+class JiraSourceIn(BaseModel):
+    type: Literal["jira"]
+    base_url: str
+    email: str
+    api_token: str
+    project_key: str
+    label: str = ""
+
+    @field_validator("base_url")
+    @classmethod
+    def _looks_like_a_site(cls, v: str) -> str:
+        v = v.strip().split("#")[0].split("?")[0].rstrip("/")
+        if not v.startswith(("http://", "https://")):
+            raise ValueError(
+                "Jira site must be a URL, like https://your-org.atlassian.net"
+            )
+        # People paste the ticket they are looking at; cut it back to the site.
+        marker = "/browse/"
+        idx = v.find(marker)
+        if idx != -1:
+            v = v[:idx]
         return v
 
 
@@ -132,6 +157,62 @@ async def _verify_confluence(body) -> None:
                 )
 
 
+async def _verify_jira(body) -> None:
+    """
+    Confirm the site answers, the credentials work, and the project exists —
+    before anything is stored. Same shape as the Confluence check; a wrong
+    project key lists the keys that actually exist.
+    """
+    import base64 as _b64
+    import httpx as _httpx
+
+    base = body.base_url.rstrip("/")
+    project_key = body.project_key.strip().upper()
+    auth = _b64.b64encode(f"{body.email}:{body.api_token}".encode()).decode()
+    headers = {"Authorization": f"Basic {auth}", "Accept": "application/json"}
+
+    async with _httpx.AsyncClient(headers=headers, timeout=15, follow_redirects=True) as c:
+        try:
+            r = await c.get(f"{base}/rest/api/3/myself")
+        except Exception as exc:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                f"Couldn't reach {base} — check the site address. ({exc.__class__.__name__})",
+            )
+
+        if r.status_code in (401, 403):
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "Jira rejected those credentials. The email must be the Atlassian "
+                "account that created the API token, and the token must not have expired.",
+            )
+        if r.status_code == 404 or "application/json" not in r.headers.get("content-type", ""):
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                f"{base} doesn't look like a Jira site. The address is usually "
+                "https://your-org.atlassian.net",
+            )
+        if r.status_code != 200:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                f"Jira returned {r.status_code} when checking the account.",
+            )
+
+        project = await c.get(f"{base}/rest/api/3/project/{project_key}")
+        if project.status_code != 200:
+            listing = await c.get(
+                f"{base}/rest/api/3/project/search", params={"maxResults": 100}
+            )
+            visible = "; ".join(
+                p.get("key", "") for p in listing.json().get("values", []) if p.get("key")
+            ) or "none"
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                f"No project with key '{project_key}' is visible to this account. "
+                f"Projects it can see: {visible}",
+            )
+
+
 def _source_doc(workspace_id: str, source_type: str, label: str, config: dict, config_secret: dict | None = None) -> dict:
     now = datetime.now(timezone.utc)
     doc = {
@@ -161,7 +242,7 @@ async def add_source(
     # surfaces the first one's complaint ("Input should be 'github'"), which
     # tells the user nothing about what they actually got wrong.
     body: Annotated[
-        Union[GithubSourceIn, UrlSourceIn, ConfluenceSourceIn],
+        Union[GithubSourceIn, UrlSourceIn, ConfluenceSourceIn, JiraSourceIn],
         Field(discriminator="type"),
     ],
     user=Depends(get_current_user),
@@ -203,6 +284,14 @@ async def add_source(
         config = {"base_url": body.base_url, "space_key": space_key, "email": body.email}
         config_secret = {"api_token": body.api_token}
         doc = _source_doc(ws["_id"], "confluence", label, config, config_secret)
+
+    elif body.type == "jira":
+        await _verify_jira(body)
+        project_key = body.project_key.strip().upper()
+        label = body.label or f"Jira: {project_key}"
+        config = {"base_url": body.base_url, "project_key": project_key, "email": body.email}
+        config_secret = {"api_token": body.api_token}
+        doc = _source_doc(ws["_id"], "jira", label, config, config_secret)
 
     await db.sources.insert_one(doc)
     return {"source": serialize_source(doc)}

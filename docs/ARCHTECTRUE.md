@@ -104,7 +104,7 @@ How content gets into the agent's memory.
 | **File Upload** | None (platform auth) | PDF, MD, TXT, DOCX | ✅ Built |
 | **URLs** | None | Any public web page (pre-validated with HEAD request) | ✅ Built |
 | **Confluence** | API token | Wiki spaces, pages | ✅ Built |
-| Jira | API token | Tickets, epics, boards | Future |
+| **Jira** | API token | Issues, comments, status (same token as Confluence) | ✅ Built |
 | SharePoint | MS Graph OAuth | Documents, folders | Future |
 | Slack | OAuth | Channel messages | Future |
 
