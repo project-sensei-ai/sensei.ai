@@ -39,6 +39,15 @@ class Settings(BaseSettings):
     BEDROCK_KB_ID: str = ""
     BEDROCK_KB_DATA_SOURCE_ID: str = ""  # required to trigger KB sync after upload
 
+    # Outbound email — optional. Without it the invite link is returned to the
+    # owner in the UI instead, which is also how reviewers test the flow.
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM: str = ""
+    SMTP_STARTTLS: bool = True
+
     # Frontend (used for invite URL generation)
     FRONTEND_ORIGIN: str = "http://localhost:5173"
     # Built SPA served by this app in single-origin deployments. Empty or missing

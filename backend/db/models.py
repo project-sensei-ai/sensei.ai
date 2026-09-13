@@ -11,6 +11,8 @@ def serialize_user(doc: dict) -> dict:
         "name": doc.get("name") or doc["email"].split("@")[0],
         "picture": doc.get("picture"),
         "has_password": bool(doc.get("password_hash")),
+        "role": doc.get("role", "owner"),
+        "status": doc.get("status", "active"),
         "created_at": _iso(doc.get("created_at")),
     }
 
@@ -28,14 +30,25 @@ def serialize_workspace(doc: dict, role: str | None = None) -> dict:
     return out
 
 
-def serialize_member(doc: dict) -> dict:
-    return {
+def serialize_member(doc: dict, user: dict | None = None, invite_url: str | None = None) -> dict:
+    out = {
         "id": doc["_id"],
         "workspace_id": doc["workspace_id"],
         "user_id": doc["user_id"],
         "role": doc.get("role", "member"),
+        "status": doc.get("status", "active"),
+        "invited_at": _iso(doc.get("invited_at")),
         "joined_at": _iso(doc.get("joined_at")),
     }
+    if user:
+        out["email"] = user.get("email")
+        out["name"] = user.get("name") or (user.get("email") or "").split("@")[0]
+        out["picture"] = user.get("picture")
+    if invite_url:
+        # Surfaced so an owner can hand the link over directly when mail is not
+        # configured — which is how reviewers exercise the flow.
+        out["invite_url"] = invite_url
+    return out
 
 
 def serialize_source(doc: dict) -> dict:

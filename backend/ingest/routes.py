@@ -19,7 +19,7 @@ async def _readable_source(source_id: str, user: dict, db, owner_only: bool = Fa
     if not source:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Source not found")
     if owner_only and role not in OWNER_ROLES:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Only the workspace owner can start ingestion")
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Only the project owner can start ingestion")
     return source
 
 

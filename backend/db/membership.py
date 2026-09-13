@@ -13,14 +13,23 @@ from fastapi import HTTPException, status
 OWNER_ROLES = {"owner", "admin"}
 
 
-def member_doc(workspace_id: str, user_id: str, role: str, invited_by: str | None = None) -> dict:
+def member_doc(
+    workspace_id: str,
+    user_id: str,
+    role: str,
+    invited_by: str | None = None,
+    status: str = "active",
+) -> dict:
+    now = datetime.now(timezone.utc)
     return {
         "_id": uuid4().hex,
         "workspace_id": workspace_id,
         "user_id": user_id,
         "role": role,
+        "status": status,          # invited → active once they accept
         "invited_by": invited_by,
-        "joined_at": datetime.now(timezone.utc),
+        "invited_at": now,
+        "joined_at": now if status == "active" else None,
     }
 
 
@@ -30,6 +39,12 @@ async def require_workspace(user, db) -> tuple[dict, str]:
     Raises 404 if they belong to none — the frontend reads that as "go onboard".
     """
     member = await db.members.find_one({"user_id": user["id"]})
+    if member and member.get("status", "active") != "active":
+        # Added to the allowlist but has not accepted yet.
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Your invite is still pending — open the link your project owner sent you.",
+        )
     if member:
         workspace = await db.workspaces.find_one({"_id": member["workspace_id"]})
         if workspace:
@@ -48,12 +63,12 @@ async def require_workspace(user, db) -> tuple[dict, str]:
     )
 
 
-async def require_owner(user, db) -> dict:
+async def require_owner(user, db, action: str = "change this project") -> dict:
     """Return the workspace this user owns or administers. 403 for plain members."""
     workspace, role = await require_workspace(user, db)
     if role not in OWNER_ROLES:
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
-            "Only the workspace owner can change sources",
+            f"Only the project owner can {action}",
         )
     return workspace
