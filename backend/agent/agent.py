@@ -85,6 +85,10 @@ def _build_model(background: bool = False):
             "api_key": settings.GROQ_API_KEY,
             "base_url": "https://api.groq.com/openai/v1",
         },
+        # A structured report of eight gaps is a lot of tokens in one response,
+        # and running out mid-object fails the whole run with
+        # "unrecoverable state due to max_tokens limit".
+        params={"max_tokens": settings.MAX_OUTPUT_TOKENS},
     )
 
 

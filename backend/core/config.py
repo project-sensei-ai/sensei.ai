@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     # How long a project's research findings stay reusable before the agent
     # goes and looks again.
     RESEARCH_TTL_HOURS: int = 24
+    # Output ceiling per model response.
+    MAX_OUTPUT_TOKENS: int = 8000
     CHROMA_PERSIST_DIR: str = "./chroma_data"
 
     # AWS / Bedrock AgentCore

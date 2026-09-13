@@ -77,18 +77,35 @@ Call `list_project_knowledge` first to see what exists. Then use
 - Thin coverage: a repository or space that is connected but holds almost
   nothing readable.
 
-Report absences, not contents. For each, say what made you notice it — a
-reference that goes nowhere, a component with no owner, a question the sources
-cannot answer. Do not invent gaps to fill a quota, and do not list something as
-missing without checking for it first."""
+Before you call something missing, SEARCH FOR IT. The inventory tells you which
+documents exist, not what is inside them — a README may well contain the local
+setup steps you are about to report as absent. A gap you did not search for is a
+guess, and a wrong one costs the reader more than saying nothing.
+
+For each real absence, say what made you notice it — a reference that goes
+nowhere, a component with no owner, a question the sources cannot answer.
+
+Also note, for each, what raw material the sources DO hold that bears on it. A
+Dockerfile and a CI workflow are most of a deployment document; a commit history
+and a collaborator list are most of an ownership map. Someone downstream decides
+whether that is enough to write from, so give them the evidence either way.
+
+Report absences, not contents. Do not invent gaps to fill a quota."""
 
 _COMPOSE = """You turn a documentation survey into a structured report.
 
 Rules:
 - Only include gaps the survey actually evidenced. No speculation.
-- `can_draft` is true only when the indexed sources plainly contain the raw
-  material — CI config and a Dockerfile can become a deployment doc; nothing in
-  the index can become an incident runbook that was never written.
+- `can_draft` asks one question: could a careful writer produce a genuinely
+  useful first draft from what the sources hold? Be willing here. A Dockerfile,
+  a compose file and a CI workflow are most of a deployment document. A commit
+  history and a collaborator list are most of an ownership map. Config and
+  settings files are most of a local-run guide. The draft will be reviewed by a
+  human before it is published, so a useful-but-incomplete draft beats refusing.
+
+  Say false only when the sources hold essentially nothing on the subject — an
+  incident runbook cannot be written from documentation that never mentions
+  incidents. When false, `draft_from` is empty.
 - `severity` is about consequence to someone doing the work, not tidiness.
   Nobody able to deploy is high. A missing README on a scratch repo is low.
 - `evidence` keeps the source labels the survey named."""
@@ -104,12 +121,20 @@ Rules:
 - Write the document someone would actually use: concrete steps, real file and
   command names taken from the sources, no placeholder prose.
 - If the sources genuinely do not support the document, say so in the body
-  rather than inventing a plausible one."""
+  rather than inventing a plausible one.
+
+Finish with exactly these two sections, in this order:
+
+## Sources
+- one bullet per indexed source you drew on
+
+## Assumptions
+- one bullet per thing you inferred rather than found; write "None" if there were none"""
 
 
-def _agent(system_prompt: str, tools: list | None = None) -> Agent:
+def _agent(system_prompt: str, tools: list | None = None, background: bool = True) -> Agent:
     return Agent(
-        model=_build_model(background=True),
+        model=_build_model(background=background),
         tools=tools or [],
         system_prompt=system_prompt,
         retry_strategy=ModelRetryStrategy(max_attempts=3, initial_delay=2, max_delay=8),
@@ -120,7 +145,7 @@ def _agent(system_prompt: str, tools: list | None = None) -> Agent:
 
 async def audit_project(workspace_id: str, chroma_client, db=None) -> GapReport:
     search_tool, _ = make_search_tool(
-        workspace_id, chroma_client, n_results=4, passage_chars=450, budget=4,
+        workspace_id, chroma_client, n_results=5, passage_chars=500, budget=6,
     )
     inventory_tool = make_inventory_tool(workspace_id, chroma_client)
 
@@ -132,18 +157,33 @@ async def audit_project(workspace_id: str, chroma_client, db=None) -> GapReport:
     builder.set_node_timeout(240)
     graph = builder.build()
 
-    result = await graph.invoke_async(
-        "Audit this project's documentation and report what is missing."
-    )
-    if db is not None:
-        await usage.record(db, workspace_id, "gaps.survey",
-                           getattr(result, "accumulated_usage", None),
-                           settings.GROQ_BACKGROUND_MODEL)
+    # The survey sometimes ends on its tool calls without writing anything up.
+    # Composing from that yields a confident, empty report — a failure shaped
+    # exactly like a clean bill of health, which is the worst way for this
+    # feature to break. Check the survey actually said something.
+    MIN_SURVEY = 400
+    survey = ""
+    for attempt in (1, 2):
+        result = await graph.invoke_async(
+            "Audit this project's documentation and report what is missing."
+        )
+        if db is not None:
+            await usage.record(db, workspace_id, "gaps.survey",
+                               getattr(result, "accumulated_usage", None),
+                               settings.GROQ_BACKGROUND_MODEL)
+        node = result.results.get("survey")
+        survey = str(node.result).strip() if node is not None else ""
+        if len(survey) >= MIN_SURVEY:
+            break
+        print(f"[gaps] survey returned {len(survey)} chars on attempt {attempt} — retrying")
 
-    node = result.results.get("survey")
-    survey = str(node.result) if node is not None else ""
+    if len(survey) < MIN_SURVEY:
+        raise RuntimeError(
+            "The audit could not finish — the survey step returned nothing usable "
+            "twice over. Try again shortly."
+        )
 
-    composer = _agent(_COMPOSE)
+    composer = _agent(_COMPOSE, background=False)
     return await composer.structured_output_async(
         GapReport, f"Survey findings:\n\n{survey}"
     )
@@ -200,6 +240,59 @@ async def scan_gaps(db, chroma_client, workspace_id: str, force: bool = False) -
 
 # ── Drafting — closing the gap ────────────────────────────────────────────────
 
+def _parse_draft(text: str, fallback_title: str) -> DraftDocument:
+    """
+    Split a drafted markdown document into body, sources and assumptions.
+
+    The writer is asked to end with `## Sources` and `## Assumptions`. Both are
+    optional here: a draft missing them is still a useful draft, and losing the
+    document because a heading was spelled differently would be absurd.
+    """
+    import re
+
+    def take(heading: str) -> list[str]:
+        m = re.search(rf"^#+\s*{heading}\s*$(.*?)(?=^#+\s|\Z)", text,
+                      re.IGNORECASE | re.MULTILINE | re.DOTALL)
+        if not m:
+            return []
+        items = [
+            re.sub(r"^[-*]\s*", "", ln).strip()
+            for ln in m.group(1).strip().splitlines()
+            if ln.strip().startswith(("-", "*"))
+        ]
+        return [i for i in items if i and i.lower() not in {"none", "n/a"}]
+
+    sources = take("Sources")
+    assumptions = take("Assumptions")
+
+    # Body is everything before the trailing sections.
+    body = text
+    cut = re.search(r"^#+\s*Sources\s*$", text, re.IGNORECASE | re.MULTILINE)
+    if cut:
+        body = text[: cut.start()].rstrip()
+
+    # Look for the title outside fenced code. A guide that shows shell output
+    # will contain lines starting with '#', and the first one won it — the last
+    # draft was titled "backend   | 0.0.0.0:8000->8000/tcp".
+    uncoded = re.sub(r"```.*?```", "", body, flags=re.DOTALL)
+    title = fallback_title
+    heading = re.search(r"^#\s+(.+)$", uncoded, re.MULTILINE)
+    if heading:
+        title = heading.group(1).strip()
+    else:
+        # Many drafts open with a bold line instead of a heading.
+        bold = re.search(r"^\*\*(.+?)\*\*\s*$", uncoded.strip(), re.MULTILINE)
+        if bold:
+            title = bold.group(1).strip()
+    return DraftDocument(
+        title=title,
+        body_markdown=body.strip(),
+        sources_used=sources,
+        assumptions=assumptions,
+    )
+
+
+
 async def draft_for_gap(db, chroma_client, workspace_id: str, gap_id: str) -> None:
     """Write the missing document, from the sources the gap named."""
     now = datetime.now(timezone.utc)
@@ -220,13 +313,29 @@ async def draft_for_gap(db, chroma_client, workspace_id: str, gap_id: str) -> No
         search_tool, _ = make_search_tool(
             workspace_id, chroma_client, n_results=5, passage_chars=700, budget=3,
         )
+
+        # Two steps, and they cannot be collapsed into one. Asking an agent that
+        # holds tools for structured output sets tool_choice="none" while the
+        # model still wants to search, and the provider rejects the call
+        # outright: "Tool choice is none, but model called a tool". So the
+        # researcher gathers with tools, and a second agent with none shapes the
+        # result.
         writer = _agent(_DRAFT, [search_tool])
-        draft = await writer.structured_output_async(
-            DraftDocument,
+        written = await writer.invoke_async(
             f"Draft this missing document: {gap['title']}\n\n"
             f"Why it is needed: {gap['detail']}\n"
-            f"Build it from these indexed sources: {', '.join(gap.get('draft_from') or []) or 'whatever you can find'}",
+            f"Build it from these indexed sources: "
+            f"{', '.join(gap.get('draft_from') or []) or 'whatever you can find'}"
         )
+        await usage.record(db, workspace_id, "gaps.draft.write",
+                           getattr(written, "accumulated_usage", None),
+                           settings.GROQ_BACKGROUND_MODEL)
+
+        # No second model call. The draft is already markdown, and pushing a long
+        # document through a JSON schema only added a way to fail — the shaper
+        # returned an empty generation and took the whole draft down with it.
+        # The writer is asked for two trailing sections; parse those out.
+        draft = _parse_draft(str(written), gap["title"])
         await db.drafts.update_one(
             {"workspace_id": workspace_id, "gap_id": gap_id},
             {"$set": {"status": "ready", "draft": draft.model_dump(),
