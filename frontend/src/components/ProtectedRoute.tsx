@@ -18,7 +18,6 @@ export default function ProtectedRoute({ children, skipWorkspaceCheck = false }:
     isLoading: wsLoading,
     isUninitialized: wsUninitialized,
     isError: wsIsError,
-    error: wsError,
   } = useGetMyWorkspaceQuery(undefined, { skip: skipWs })
 
   // Show spinner while auth loads, or while workspace query is pending / loading
@@ -35,11 +34,12 @@ export default function ProtectedRoute({ children, skipWorkspaceCheck = false }:
     return <Navigate to="/login" replace />
   }
 
-  if (!skipWorkspaceCheck) {
-    const status = wsError && 'status' in wsError ? (wsError as { status: number }).status : null
-    if (wsIsError && (status === 404 || status !== null)) {
-      return <Navigate to="/onboarding" replace />
-    }
+  if (!skipWorkspaceCheck && wsIsError) {
+    // A member with no project is waiting to be added — they must never see the
+    // onboarding wizard, which is an owner's tool. Owners go set one up.
+    return authData.user.role === 'member'
+      ? <Navigate to="/pending" replace />
+      : <Navigate to="/onboarding" replace />
   }
 
   return <>{children}</>

@@ -8,6 +8,7 @@ import Dashboard from './pages/Dashboard'
 import Onboarding from './pages/Onboarding'
 import Sources from './pages/Sources'
 import Join from './pages/Join'
+import PendingAccess from './pages/PendingAccess'
 import ProtectedRoute from './components/ProtectedRoute'
 import OnboardingRoute from './components/OnboardingRoute'
 
@@ -32,6 +33,16 @@ function Router() {
 
         {/* INVITE LANDING — public; the page itself handles sign-in */}
         <Route path="/join" element={<Join />} />
+
+        {/* HOLDING STATE — signed in, but not on a project yet */}
+        <Route
+          path="/pending"
+          element={
+            <ProtectedRoute skipWorkspaceCheck>
+              <PendingAccess />
+            </ProtectedRoute>
+          }
+        />
 
         {/* ONBOARDING — redirects to /dashboard if workspace already exists */}
         <Route

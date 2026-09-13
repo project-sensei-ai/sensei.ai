@@ -92,7 +92,7 @@ export default function Onboarding() {
             <StepReview onDone={() => setStep(4)} />
           )}
           {step === 4 && workspaceId && (
-            <StepInvite workspaceId={workspaceId} />
+            <StepInvite />
           )}
         </div>
       </main>

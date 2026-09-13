@@ -42,13 +42,27 @@ export interface IngestStatus {
   error_message?: string
 }
 
-export interface Invite {
+export interface Member {
   id: string
   workspace_id: string
-  token: string
-  invite_url: string
-  created_at: string
-  expires_at: string
+  user_id: string
+  role: WorkspaceRole
+  status: 'active' | 'invited'
+  email?: string
+  name?: string
+  picture?: string | null
+  invited_at: string | null
+  joined_at: string | null
+  /** Owners only, and only while the invite is unused. */
+  invite_url?: string
+}
+
+export interface AddMemberResult {
+  email: string
+  status: 'invited' | 'skipped'
+  detail?: string
+  emailed?: boolean
+  invite_url?: string
 }
 
 export interface ChatCitation {
@@ -129,8 +143,22 @@ const onboardingApi = api.injectEndpoints({
       providesTags: (_r, _e, sourceId) => [{ type: 'IngestStatus', id: sourceId }],
     }),
 
-    generateInvite: builder.mutation<{ invite: Invite }, string>({
-      query: (workspaceId) => ({ url: `/workspaces/${workspaceId}/invite`, method: 'POST' }),
+    getMembers: builder.query<{ members: Member[]; can_manage: boolean }, void>({
+      query: () => '/workspaces/members',
+      providesTags: ['Member'],
+    }),
+
+    addMembers: builder.mutation<
+      { results: AddMemberResult[]; email_configured: boolean },
+      { emails: string[] }
+    >({
+      query: (body) => ({ url: '/workspaces/members', method: 'POST', body }),
+      invalidatesTags: ['Member'],
+    }),
+
+    removeMember: builder.mutation<void, string>({
+      query: (userId) => ({ url: `/workspaces/members/${userId}`, method: 'DELETE' }),
+      invalidatesTags: ['Member'],
     }),
 
     joinWorkspace: builder.mutation<
@@ -190,7 +218,9 @@ export const {
   useGetSourcesQuery,
   useTriggerIngestMutation,
   useGetIngestStatusQuery,
-  useGenerateInviteMutation,
+  useGetMembersQuery,
+  useAddMembersMutation,
+  useRemoveMemberMutation,
   useJoinWorkspaceMutation,
   useDeleteSourceMutation,
   useListChatSessionsQuery,

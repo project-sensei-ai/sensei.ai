@@ -1,11 +1,22 @@
 import { api } from './api'
 
+export type UserRole = 'owner' | 'member'
+
 export interface User {
   id: string
   email: string
   name: string
   picture: string | null
   has_password: boolean
+  role: UserRole
+  status: 'active' | 'invited'
+}
+
+export interface InviteInfo {
+  email: string
+  workspace_name: string
+  invited_by: string | null
+  needs_password: boolean
 }
 
 interface AuthResponse {
@@ -16,6 +27,7 @@ interface RegisterArgs {
   name: string
   email: string
   password: string
+  role: UserRole
 }
 
 interface CredentialsArgs {
@@ -51,6 +63,16 @@ export const authApi = api.injectEndpoints({
       query: () => ({ url: '/auth/logout', method: 'POST' }),
       invalidatesTags: ['User'],
     }),
+    inspectInvite: builder.query<InviteInfo, string>({
+      query: (token) => `/auth/invite/${token}`,
+    }),
+    acceptInvite: builder.mutation<
+      AuthResponse,
+      { token: string; name?: string; password: string }
+    >({
+      query: (body) => ({ url: '/auth/accept-invite', method: 'POST', body }),
+      invalidatesTags: ['User', 'Workspace'],
+    }),
     setPassword: builder.mutation<
       { message: string },
       { password: string; current_password?: string }
@@ -68,4 +90,6 @@ export const {
   useGetMeQuery,
   useLogoutMutation,
   useSetPasswordMutation,
+  useInspectInviteQuery,
+  useAcceptInviteMutation,
 } = authApi

@@ -1,6 +1,9 @@
 import { useState, type FormEvent } from 'react'
-import { KeyRound, X } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { KeyRound, MessageSquare, Database, Users, X } from 'lucide-react'
 import { AppShell } from '@/components/AppShell'
+import TeamPanel from '@/components/TeamPanel'
+import { useGetMyWorkspaceQuery } from '@/services/onboardingApi'
 import {
   errorMessage,
   useGetMeQuery,
@@ -14,6 +17,7 @@ import {
 import { Button } from '@/components/ui/button'
 import {
   Card,
+  CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
@@ -23,9 +27,20 @@ import { Input } from '@/components/ui/input'
 const NUDGE_KEY = 'sensei-hide-password-nudge'
 
 const overviewCards = [
-  { title: 'Sources', description: 'Confluence, GitHub, Jira, Teams' },
-  { title: 'Memory', description: 'Project context & decisions' },
-  { title: 'Chat', description: 'Cited, grounded answers' },
+  {
+    title: 'Sources',
+    description: 'GitHub, Confluence, Jira, files and links the agent may read',
+    to: '/sources',
+    icon: Database,
+    ownerOnly: false,
+  },
+  {
+    title: 'Chat',
+    description: 'Ask anything about the project — every answer cites its source',
+    to: '/chat',
+    icon: MessageSquare,
+    ownerOnly: false,
+  },
 ]
 
 function SetPasswordBanner() {
@@ -102,31 +117,60 @@ function SetPasswordBanner() {
 
 export default function Dashboard() {
   const { data } = useGetMeQuery()
+  const { data: wsData } = useGetMyWorkspaceQuery()
   const user = data?.user
+  const workspace = wsData?.workspace
+  const isOwner = workspace?.role !== 'member'
 
   return (
     <AppShell>
-      {user && !user.has_password && <SetPasswordBanner />}
+      {user && user.has_password === false && <SetPasswordBanner />}
 
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">
           Welcome back{user ? `, ${user.name.split(' ')[0]}` : ''}
         </h1>
         <p className="text-muted-foreground">
-          Here's your project context at a glance.
+          {workspace
+            ? isOwner
+              ? `You own ${workspace.name}. The agent reads only what you connect.`
+              : `You're on ${workspace.name}. Ask the agent anything about it.`
+            : "Here's your project context at a glance."}
         </p>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2">
         {overviewCards.map((card) => (
-          <Card key={card.title}>
-            <CardHeader>
-              <CardTitle>{card.title}</CardTitle>
-              <CardDescription>{card.description}</CardDescription>
-            </CardHeader>
-          </Card>
+          <Link key={card.title} to={card.to} className="group">
+            <Card className="h-full transition-colors group-hover:border-foreground/20">
+              <CardHeader>
+                <card.icon className="mb-1 h-5 w-5 text-muted-foreground" />
+                <CardTitle>{card.title}</CardTitle>
+                <CardDescription>{card.description}</CardDescription>
+              </CardHeader>
+            </Card>
+          </Link>
         ))}
       </div>
+
+      {/* R3.4 — the second place an owner manages the allowlist. Same component
+          as the onboarding wizard, so the rule cannot drift between them. */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Users className="h-4 w-4 text-muted-foreground" />
+            Team
+          </CardTitle>
+          <CardDescription>
+            {isOwner
+              ? 'Everyone who can ask the agent about this project. Nobody else can reach it.'
+              : 'Everyone on this project.'}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <TeamPanel />
+        </CardContent>
+      </Card>
     </AppShell>
   )
 }

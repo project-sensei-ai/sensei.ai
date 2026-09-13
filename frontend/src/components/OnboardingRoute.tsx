@@ -32,6 +32,12 @@ export default function OnboardingRoute({ children }: { children: ReactNode }) {
     return <Navigate to="/login" replace />
   }
 
+  // R3.1 — onboarding an agent is an owner's job. Members have no business here
+  // even by typing the URL.
+  if (authData.user.role === 'member') {
+    return <Navigate to={wsData?.workspace ? '/dashboard' : '/pending'} replace />
+  }
+
   // Only redirect if workspace existed before this onboarding session started
   if (initiallyHadWorkspace.current === true) {
     return <Navigate to="/dashboard" replace />
