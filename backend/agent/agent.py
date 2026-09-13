@@ -50,10 +50,23 @@ def _build_model():
     drift onto different backends — one LLM_BACKEND flag moves all of them.
     """
     if settings.LLM_BACKEND == "bedrock":
+        import boto3
         from strands.models.bedrock import BedrockModel
+
+        # Credentials in backend/.env are loaded by pydantic-settings, which does
+        # not export them to the process environment — so boto3's default chain
+        # cannot see them and Bedrock fails with NoCredentialsError even though
+        # the keys are right there. Build the session explicitly instead. An IAM
+        # role (no keys in .env) still works: boto3 falls back to its own chain.
+        session = boto3.Session(
+            aws_access_key_id=settings.AWS_ACCESS_KEY_ID or None,
+            aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY or None,
+            region_name=settings.AWS_REGION,
+        )
+        # The session already carries the region; passing both is rejected.
         return BedrockModel(
             model_id=settings.BEDROCK_MODEL_ID,
-            region_name=settings.AWS_REGION,
+            boto_session=session,
         )
     if settings.LLM_BACKEND == "ollama":
         from strands.models.openai import OpenAIModel

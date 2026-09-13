@@ -488,7 +488,14 @@ def make_inventory_tool(workspace_id: str, chroma_client):
     return list_project_knowledge
 
 
-def make_search_tool(workspace_id: str, chroma_client):
+def make_search_tool(
+    workspace_id: str,
+    chroma_client,
+    *,
+    n_results: int = 8,
+    passage_chars: int = 800,
+    budget: int = 3,
+):
     """
     Factory that returns a (search_tool, captured_results) pair.
     The search_tool is a Strands @tool that queries the workspace ChromaDB collection.
@@ -507,9 +514,13 @@ def make_search_tool(workspace_id: str, chroma_client):
     # Left unbounded, the model will re-search a half-dozen times with reworded
     # queries, re-sending the same passages each time. That burns the context
     # window, trips provider rate limits, and each throttled retry sleeps with
-    # exponential backoff — a question can hang for minutes. Three searches is
-    # more than enough to cover a rephrase or a second angle.
-    MAX_SEARCHES = 3
+    # exponential backoff — a question can hang for minutes.
+    #
+    # The three knobs are tuned per caller. Interactive chat can afford eight
+    # 800-character passages; a background agent in a three-node graph cannot —
+    # every passage it pulls is re-sent on each subsequent turn, and the totals
+    # compound into daily token caps.
+    MAX_SEARCHES = budget
 
     @tool
     def search_project_docs(query: str) -> str:
@@ -535,7 +546,7 @@ def make_search_tool(workspace_id: str, chroma_client):
 
         # Chunks are small enough to fit the embedder's window, so ask for more of
         # them — a section's answer is often split across two neighbouring chunks.
-        n = min(8, count)
+        n = min(n_results, count)
         results = collection.query(
             query_texts=[query],
             n_results=n,
@@ -569,7 +580,7 @@ def make_search_tool(workspace_id: str, chroma_client):
                 meta.get("title") or meta.get("url") or "Unknown source"
             )
             score = round(1 - float(dist), 3)
-            passages.append(f"[{i + 1}] Source: {label} (relevance {score:.0%})\n{doc[:800]}")
+            passages.append(f"[{i + 1}] Source: {label} (relevance {score:.0%})\n{doc[:passage_chars]}")
             if label not in seen_labels:
                 seen_labels.add(label)
                 captured.append({

@@ -113,7 +113,10 @@ async def research_project(workspace_id: str, chroma_client) -> str:
         """A tool instance per node. The search budget and the seen-chunks set
         live in the factory closure, so sharing one instance across nodes means
         the first researcher spends the budget for everybody."""
-        tool, _ = make_search_tool(workspace_id, chroma_client)
+        tool, _ = make_search_tool(
+            workspace_id, chroma_client,
+            n_results=4, passage_chars=450, budget=2,
+        )
         return tool
 
     inventory_tool = make_inventory_tool(workspace_id, chroma_client)
