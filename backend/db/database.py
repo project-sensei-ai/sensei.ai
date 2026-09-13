@@ -71,6 +71,9 @@ async def ensure_indexes(db) -> None:
     except Exception as exc:
         print(f"[DB] research cache index warning: {exc}")
 
+    await db.unanswered.create_index([("workspace_id", 1), ("status", 1)])
+    await db.unanswered.create_index([("workspace_id", 1), ("question_key", 1)])
+
     # Chat session indexes
     await db.chat_sessions.create_index([("workspace_id", 1), ("archived", 1), ("updated_at", -1)])
     await db.chat_sessions.create_index([("owner_id", 1), ("archived", 1), ("updated_at", -1)])

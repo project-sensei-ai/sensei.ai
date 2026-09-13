@@ -140,10 +140,17 @@ def should_post(answer: str, citations: list[dict], mode: Mode) -> tuple[bool, s
     direct question is worse than admitting ignorance. But speaking unbidden
     requires evidence, and evidence means citations.
     """
+    from answers.store import looks_like_a_refusal
+
     if mode is Mode.MENTIONED:
         return True, "asked directly"
     if not citations:
         return False, "the agent could not cite a source, so it says nothing"
+    if looks_like_a_refusal(answer):
+        # Citations say where it looked, not that it found anything. Posting
+        # "I checked six documents and none of them say" into a busy channel is
+        # noise wearing the costume of an answer.
+        return False, "it searched but could not actually answer"
     if len(answer.strip()) < 40:
         return False, "answer too thin to be worth interrupting for"
     return True, f"answered with {len(citations)} source(s)"

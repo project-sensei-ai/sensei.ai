@@ -129,3 +129,18 @@ def serialize_draft(doc: dict) -> dict:
         "error_message": doc.get("error_message"),
         "updated_at": _iso(doc.get("updated_at")),
     }
+
+
+def serialize_unanswered(doc: dict) -> dict:
+    return {
+        "id": doc["_id"],
+        "question": doc.get("question"),
+        "asked_by_name": doc.get("asked_by_name"),
+        "times_asked": doc.get("times_asked", 1),
+        "status": doc.get("status", "open"),
+        "answer": doc.get("answer"),
+        "answered_by": doc.get("answered_by"),
+        "answered_at": _iso(doc.get("answered_at")),
+        "created_at": _iso(doc.get("created_at")),
+        "last_asked_at": _iso(doc.get("last_asked_at")),
+    }

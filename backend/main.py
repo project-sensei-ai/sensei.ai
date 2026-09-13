@@ -10,6 +10,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 
 from auth.routes import router as auth_router
 from activity.routes import router as activity_router
+from answers.routes import router as answers_router
 from briefs.routes import router as briefs_router
 from gaps.routes import router as gaps_router
 from chat.routes import router as chat_router
@@ -93,6 +94,7 @@ app.include_router(chat_router, prefix=f"{API_PREFIX}/chat")
 app.include_router(briefs_router, prefix=f"{API_PREFIX}/briefs")
 app.include_router(gaps_router, prefix=f"{API_PREFIX}/gaps")
 app.include_router(activity_router, prefix=f"{API_PREFIX}/activity")
+app.include_router(answers_router, prefix=f"{API_PREFIX}/answers")
 
 
 def _health() -> dict:

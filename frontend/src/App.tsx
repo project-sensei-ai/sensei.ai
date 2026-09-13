@@ -11,6 +11,7 @@ import Join from './pages/Join'
 import PendingAccess from './pages/PendingAccess'
 import Brief from './pages/Brief'
 import Gaps from './pages/Gaps'
+import Answers from './pages/Answers'
 import ProtectedRoute from './components/ProtectedRoute'
 import OnboardingRoute from './components/OnboardingRoute'
 
@@ -70,6 +71,14 @@ function Router() {
           element={
             <ProtectedRoute>
               <Gaps />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/answers"
+          element={
+            <ProtectedRoute>
+              <Answers />
             </ProtectedRoute>
           }
         />

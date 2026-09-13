@@ -9,6 +9,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from agent.agent import build_agent, make_session_manager
+from answers import store as answer_store
 from auth.deps import get_current_user
 from db.chroma import get_chroma
 from db.database import get_db
@@ -113,6 +114,12 @@ async def send_message(
             "$push": {"messages": {"$each": [user_msg, ai_msg]}},
         },
     )
+
+    # An uncited answer is an ungrounded one. Record it rather than losing the
+    # one moment where we know exactly which missing knowledge cost someone time.
+    if answer_store.is_worth_recording(body.question, answer, citations):
+        await answer_store.record(db, session["workspace_id"], body.question, user, session_id)
+
     return {"answer": answer, "citations": citations}
 
 
@@ -194,6 +201,11 @@ async def stream_message(
                     ]}},
                 },
             )
+            if answer_store.is_worth_recording(body.question, answer, captured):
+                await answer_store.record(
+                    db, session["workspace_id"], body.question, user, session_id
+                )
+
             yield _sse({"type": "done", "citations": captured})
 
         except Exception as exc:

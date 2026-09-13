@@ -122,6 +122,27 @@ export interface Draft {
   updated_at: string | null
 }
 
+export interface Unanswered {
+  id: string
+  question: string
+  asked_by_name: string | null
+  times_asked: number
+  status: 'open' | 'answered' | 'dismissed'
+  answer: string | null
+  answered_by: string | null
+  answered_at: string | null
+  last_asked_at: string | null
+}
+
+export interface LedgerStats {
+  open: number
+  answered_by_humans: number
+  dismissed: number
+  answers_given: number
+  answers_with_sources: number
+  without_a_human_pct: number
+}
+
 export interface ActivityEvent {
   at: string | null
   kind: 'brief' | 'audit' | 'draft' | 'source'
@@ -269,6 +290,24 @@ const onboardingApi = api.injectEndpoints({
       providesTags: (_r, _e, gapId) => [{ type: 'Draft', id: gapId }],
     }),
 
+    getLedger: builder.query<
+      { entries: Unanswered[]; can_answer: boolean; stats: LedgerStats },
+      void
+    >({
+      query: () => '/answers',
+      providesTags: ['Answer'],
+    }),
+
+    answerQuestion: builder.mutation<{ message: string }, { id: string; text: string }>({
+      query: ({ id, text }) => ({ url: `/answers/${id}`, method: 'POST', body: { text } }),
+      invalidatesTags: ['Answer', 'Activity'],
+    }),
+
+    dismissQuestion: builder.mutation<void, string>({
+      query: (id) => ({ url: `/answers/${id}`, method: 'DELETE' }),
+      invalidatesTags: ['Answer'],
+    }),
+
     getActivity: builder.query<{ events: ActivityEvent[]; unprompted_count: number }, void>({
       query: () => '/activity',
       providesTags: ['Activity'],
@@ -343,6 +382,9 @@ export const {
   useGetBriefsQuery,
   useRegenerateBriefMutation,
   useGetActivityQuery,
+  useGetLedgerQuery,
+  useAnswerQuestionMutation,
+  useDismissQuestionMutation,
   useGetGapsQuery,
   useRescanGapsMutation,
   useRequestDraftMutation,
