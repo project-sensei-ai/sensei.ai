@@ -10,6 +10,13 @@ docker compose up --build
 open http://localhost:8000
 ```
 
+> **Not yet run.** The Dockerfile has been checked statically — every `COPY`
+> source exists, both base images are pinned, and the two build steps
+> (`npm ci && npm run build`, then `pip install -r requirements.txt`) are known
+> to succeed natively. But the image itself has never been built, because Docker
+> is not installed on the development machine. Build it once before relying on
+> any of the deployment paths below.
+
 ---
 
 ## Option A — Fly.io  (fastest; recommended if the clock is short)

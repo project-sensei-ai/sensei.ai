@@ -177,6 +177,7 @@ async def add_members(
     now = datetime.now(timezone.utc)
     inviter = user.get("name") or user["email"]
     results = []
+    brief_for: list[str] = []
 
     for raw in body.emails:
         email = str(raw).lower().strip()
@@ -235,16 +236,8 @@ async def add_members(
             "accepted_at": None,
         })
 
-        # Nobody asked for this. Adding a person is the event; the agent goes and
-        # researches the project for them so the brief is waiting when they
-        # first log in.
-        background_tasks.add_task(
-            generate_brief,
-            request.app.state.mongo_db,
-            request.app.state.chroma_client,
-            workspace["_id"],
-            member_user["_id"],
-        )
+        # Queued rather than dispatched — see below.
+        brief_for.append(member_user["_id"])
 
         emailed = await mailer.send_invite(email, workspace["name"], inviter, _invite_url(token))
         results.append({
@@ -254,7 +247,33 @@ async def add_members(
             "invite_url": _invite_url(token),
         })
 
+    # Nobody asked for this. Adding people is the event; the agent goes and
+    # researches the project for them so their briefs are waiting.
+    #
+    # One task for the whole batch, not one per person. The project research is
+    # cached and shared, but tasks dispatched together all miss the cache — each
+    # starts before any has written it — so five new teammates meant five
+    # identical research runs competing for the same rate limit. Sequential
+    # means the first fills the cache and the rest compose from it.
+    if brief_for:
+        background_tasks.add_task(
+            _write_briefs,
+            request.app.state.mongo_db,
+            request.app.state.chroma_client,
+            workspace["_id"],
+            brief_for,
+        )
+
     return {"results": results, "email_configured": mailer.is_configured()}
+
+
+async def _write_briefs(db, chroma_client, workspace_id: str, user_ids: list[str]) -> None:
+    """Brief each new teammate in turn, so they share one research pass."""
+    for user_id in user_ids:
+        try:
+            await generate_brief(db, chroma_client, workspace_id, user_id)
+        except Exception as exc:
+            print(f"[brief] {user_id} failed: {exc}")
 
 
 @router.delete("/members/{user_id}", status_code=204)
