@@ -1,13 +1,16 @@
 import { useState, type FormEvent } from 'react'
-import { Check, Copy, Loader2, Mail, Trash2, UserPlus } from 'lucide-react'
+import { Check, Copy, Eye, Loader2, Mail, Trash2, UserPlus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import {
   useAddMembersMutation,
   useGetMembersQuery,
+  useGetSourcesQuery,
   useRemoveMemberMutation,
+  useSetSourceAccessMutation,
   type AddMemberResult,
+  type Member,
 } from '@/services/onboardingApi'
 
 /**
@@ -15,6 +18,79 @@ import {
  * wizard and on the dashboard — so the rule lives in one component: nobody
  * reaches this project unless their address is on this list.
  */
+/**
+ * What one person can be answered from.
+ *
+ * The project boundary decides who may ask at all. This decides what they are
+ * answered from once inside — two members can ask the same question and get
+ * different answers, because they have been given different sources.
+ */
+function SourceAccess({ member }: { member: Member }) {
+  const { data } = useGetSourcesQuery()
+  const [setSourceAccess, { isLoading }] = useSetSourceAccessMutation()
+  const [open, setOpen] = useState(false)
+  const sources = data?.sources ?? []
+  const allowed = member.source_access
+  const everything = allowed == null
+
+  function toggle(id: string) {
+    const next = everything
+      ? sources.filter((s) => s.id !== id).map((s) => s.id)   // narrowing from "all"
+      : allowed!.includes(id)
+      ? allowed!.filter((x) => x !== id)
+      : [...allowed!, id]
+    setSourceAccess({
+      userId: member.user_id,
+      sourceIds: next.length === sources.length ? null : next,
+    })
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-1.5 self-start text-xs text-muted-foreground hover:text-foreground"
+      >
+        <Eye className="h-3 w-3" />
+        {everything ? 'Can see every source' : `Can see ${allowed!.length} of ${sources.length} sources`}
+      </button>
+
+      {open && (
+        <div className="flex flex-col gap-1 rounded-md border bg-muted/20 p-2">
+          {sources.map((src) => {
+            const on = everything || allowed!.includes(src.id)
+            return (
+              <label key={src.id} className="flex items-center gap-2 text-xs">
+                <input
+                  type="checkbox"
+                  checked={on}
+                  disabled={isLoading}
+                  onChange={() => toggle(src.id)}
+                  className="h-3.5 w-3.5 accent-primary"
+                />
+                <span className={on ? '' : 'text-muted-foreground line-through'}>{src.label}</span>
+              </label>
+            )
+          })}
+          {sources.length === 0 && (
+            <p className="text-xs text-muted-foreground">No sources connected yet.</p>
+          )}
+          {!everything && (
+            <button
+              type="button"
+              className="mt-1 self-start text-xs underline underline-offset-2"
+              onClick={() => setSourceAccess({ userId: member.user_id, sourceIds: null })}
+            >
+              Give them everything
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function TeamPanel({ compact = false }: { compact?: boolean }) {
   const { data, isLoading } = useGetMembersQuery()
   const [addMembers, { isLoading: adding }] = useAddMembersMutation()
@@ -139,10 +215,8 @@ export default function TeamPanel({ compact = false }: { compact?: boolean }) {
           <p className="text-sm text-muted-foreground">Nobody yet.</p>
         ) : (
           members.map((m) => (
-            <div
-              key={m.id}
-              className="flex items-center gap-3 rounded-lg border bg-card px-3 py-2"
-            >
+            <div key={m.id} className="flex flex-col gap-2 rounded-lg border bg-card px-3 py-2">
+              <div className="flex items-center gap-3">
               <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-medium uppercase">
                 {(m.name || m.email || '?').slice(0, 2)}
               </div>
@@ -182,6 +256,10 @@ export default function TeamPanel({ compact = false }: { compact?: boolean }) {
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                 </Button>
+              )}
+              </div>
+              {canManage && m.role !== 'owner' && m.status === 'active' && (
+                <SourceAccess member={m} />
               )}
             </div>
           ))

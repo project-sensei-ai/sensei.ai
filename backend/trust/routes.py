@@ -92,6 +92,10 @@ async def overview(request: Request, user=Depends(get_current_user), db=Depends(
         "email": (users.get(m["user_id"]) or {}).get("email"),
         "role": m.get("role", "member"),
         "status": m.get("status", "active"),
+        # Being on the project and being able to see all of it are different
+        # things. None means every source.
+        "sees": (None if m.get("role") in OWNER_ROLES or m.get("source_access") is None
+                 else len(m.get("source_access") or [])),
     } for m in members]
 
     # ── What it actually holds ────────────────────────────────────────────────

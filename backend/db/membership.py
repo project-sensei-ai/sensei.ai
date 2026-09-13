@@ -30,7 +30,30 @@ def member_doc(
         "invited_by": invited_by,
         "invited_at": now,
         "joined_at": now if status == "active" else None,
+        # Which sources this person may be answered from. None means all of
+        # them, which is the sane default — an owner who wants to narrow it does
+        # so deliberately, rather than having to grant access before anyone can
+        # ask anything.
+        "source_access": None,
     }
+
+
+async def visible_sources(db, workspace_id: str, user_id: str) -> list[str] | None:
+    """
+    The source ids this person may be answered from, or None for all.
+
+    Owners always see everything — they chose what to connect. For members it is
+    whatever the owner set, filtered against sources that still exist, so
+    deleting a source cannot leave a dangling grant.
+    """
+    member = await db.members.find_one({"workspace_id": workspace_id, "user_id": user_id})
+    if not member or member.get("role") in OWNER_ROLES:
+        return None
+    allowed = member.get("source_access")
+    if allowed is None:
+        return None
+    live = {s["_id"] async for s in db.sources.find({"workspace_id": workspace_id})}
+    return [sid for sid in allowed if sid in live]
 
 
 async def require_workspace(user, db) -> tuple[dict, str]:

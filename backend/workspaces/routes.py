@@ -11,7 +11,7 @@ from auth.deps import get_current_user
 from core import mailer
 from core.config import settings
 from db.database import get_db
-from db.membership import member_doc, require_owner, require_workspace
+from db.membership import OWNER_ROLES, member_doc, require_owner, require_workspace
 from db.models import serialize_member, serialize_workspace
 
 INVITE_TTL_DAYS = 7
@@ -30,6 +30,11 @@ class JoinIn(BaseModel):
 
 class AddMembersIn(BaseModel):
     emails: list[EmailStr] = Field(..., min_length=1, max_length=25)
+
+
+class SourceAccessIn(BaseModel):
+    # null means every source; a list narrows it to those ids.
+    source_ids: list[str] | None = None
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
@@ -297,3 +302,39 @@ async def remove_member(
     # wrote *about this project, for that person* in the owner's list and the
     # activity feed is not revoking much.
     await db.briefs.delete_many({"workspace_id": workspace["_id"], "user_id": user_id})
+
+
+@router.put("/members/{user_id}/sources", status_code=status.HTTP_200_OK)
+async def set_source_access(
+    user_id: str,
+    body: SourceAccessIn,
+    user=Depends(get_current_user),
+    db=Depends(get_db),
+):
+    """
+    Narrow what one person can be answered from.
+
+    The project boundary decides who can ask at all; this decides what they are
+    answered from once inside. Null restores access to everything.
+    """
+    workspace = await require_owner(user, db, "change what a teammate can see")
+    member = await db.members.find_one({"workspace_id": workspace["_id"], "user_id": user_id})
+    if not member:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not on this project")
+    if member.get("role") in OWNER_ROLES:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "The project owner sees every source — they chose what to connect.",
+        )
+
+    ids = body.source_ids
+    if ids is not None:
+        live = {s["_id"] async for s in db.sources.find({"workspace_id": workspace["_id"]})}
+        unknown = [i for i in ids if i not in live]
+        if unknown:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
+                                "Those sources are not on this project")
+        ids = list(dict.fromkeys(ids))
+
+    await db.members.update_one({"_id": member["_id"]}, {"$set": {"source_access": ids}})
+    return {"user_id": user_id, "source_access": ids}

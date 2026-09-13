@@ -54,6 +54,10 @@ able to show exactly what that access is.
   returned by the API in any form.
 - **Every connector is read-only.** Nothing in this build writes to a connected
   system.
+- **Two members can get different answers.** An owner can narrow what any
+  teammate is answered from, source by source. The filter runs inside the vector
+  query rather than after it, so a restricted person gets *different* results
+  rather than fewer — and the gaps never reveal what they were not shown.
 - **The Trust page states each credential's ceiling, not just what we read.**
   A Confluence API token authorises as its owner across the whole site while
   Sensei reads one space — and the page says so, because showing only the

@@ -14,7 +14,7 @@ from auth.deps import get_current_user
 from core.errors import humanise
 from db.chroma import get_chroma
 from db.database import get_db
-from db.membership import require_workspace
+from db.membership import require_workspace, visible_sources
 from db.models import serialize_chat_session
 
 router = APIRouter(tags=["chat"])
@@ -92,7 +92,10 @@ async def send_message(
     chroma = get_chroma(request)
 
     sm = make_session_manager(session_id)
-    agent, captured = build_agent(session["workspace_id"], chroma, session_manager=sm)
+    allowed = await visible_sources(db, session["workspace_id"], user["id"])
+    agent, captured = build_agent(
+        session["workspace_id"], chroma, session_manager=sm, allowed_sources=allowed
+    )
 
     # Strands Agent.__call__ is synchronous — run it in a thread pool
     response = await asyncio.to_thread(agent, body.question)
@@ -158,9 +161,15 @@ async def stream_message(
     session = await _require_session(session_id, user, db)
     chroma = get_chroma(request)
 
+    # Resolved before the stream opens; an auth question should not be answered
+    # halfway through a response.
+    allowed = await visible_sources(db, session["workspace_id"], user["id"])
+
     async def events():
         sm = make_session_manager(session_id)
-        agent, captured = build_agent(session["workspace_id"], chroma, session_manager=sm)
+        agent, captured = build_agent(
+            session["workspace_id"], chroma, session_manager=sm, allowed_sources=allowed
+        )
         answer_parts: list[str] = []
         announced: set[str] = set()
 

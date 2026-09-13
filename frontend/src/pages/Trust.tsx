@@ -245,8 +245,17 @@ export default function Trust() {
           </CardHeader>
           <CardContent className="flex flex-col gap-2">
             {data.people.map((p) => (
-              <div key={p.email ?? p.name} className="flex items-center gap-2 text-sm">
+              <div key={p.email ?? p.name} className="flex flex-wrap items-center gap-2 text-sm">
                 <span className="min-w-0 flex-1 truncate">{p.name || p.email}</span>
+                {/* Being on the project and being able to see all of it are two
+                    different things, and this is the page that has to say so. */}
+                <span className="text-xs text-muted-foreground">
+                  {p.role === 'owner'
+                    ? 'every source'
+                    : p.sees == null
+                    ? 'every source'
+                    : `${p.sees} of ${data.grants.length} sources`}
+                </span>
                 <Badge variant={p.role === 'owner' ? 'default' : 'secondary'} className="text-xs">
                   {p.role === 'owner' ? 'Owner' : 'Member'}
                 </Badge>

@@ -45,7 +45,7 @@ Ordered by what each buys.
 
 | # | Feature | Why | Effort |
 |---|---|---|---|
-| 2.7 | **Per-item ACL filtering** | The largest remaining gap between what the product promises and what it does. Every member of a project currently sees the same corpus; access is enforced at the project boundary, not per document. PRD FR-7. | 5–6h |
+| 2.7 | **Per-item ACLs from the source** | Per-*source* visibility now ships — an owner narrows what each member is answered from, enforced in the vector query. What remains is syncing real ACLs out of GitHub and Confluence so the filter is per document and follows the source's own permissions rather than a list kept here. Needs the GitHub App first. | 5–6h |
 | 4.2 | **Person graph** | "What did Ramesh change in repo X" is unanswerable without resolving a name to a GitHub login, an Atlassian account and an email. An entire class of question. | 4–5h |
 | 1.6 | **Freshness in answers** | "per PROJ-412, synced 4 minutes ago". The difference between a status answer being trusted and being checked. | 2h |
 | 4.3 | **Eval harness** | A golden question set re-run on every retrieval change. Quality rots silently otherwise — it already did once, when 2000-character chunks were half-invisible to a 256-token embedder and nobody noticed for weeks. | 3h |

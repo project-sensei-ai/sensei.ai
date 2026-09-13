@@ -53,6 +53,8 @@ export interface Member {
   picture?: string | null
   invited_at: string | null
   joined_at: string | null
+  /** null = every source; a list narrows what they are answered from. */
+  source_access?: string[] | null
   /** Owners only, and only while the invite is unused. */
   invite_url?: string
 }
@@ -155,7 +157,14 @@ export interface Grant {
 export interface TrustOverview {
   workspace: { name: string; role: WorkspaceRole }
   grants: Grant[]
-  people: { name: string | null; email: string | null; role: string; status: string }[]
+  people: {
+    name: string | null
+    email: string | null
+    role: string
+    status: string
+    /** How many sources they can be answered from; null = all. */
+    sees: number | null
+  }[]
   coverage: {
     sources: number
     indexed_chunks: number
@@ -381,6 +390,18 @@ const onboardingApi = api.injectEndpoints({
       providesTags: ['Activity'],
     }),
 
+    setSourceAccess: builder.mutation<
+      { user_id: string; source_access: string[] | null },
+      { userId: string; sourceIds: string[] | null }
+    >({
+      query: ({ userId, sourceIds }) => ({
+        url: `/workspaces/members/${userId}/sources`,
+        method: 'PUT',
+        body: { source_ids: sourceIds },
+      }),
+      invalidatesTags: ['Member', 'Trust'],
+    }),
+
     removeMember: builder.mutation<void, string>({
       query: (userId) => ({ url: `/workspaces/members/${userId}`, method: 'DELETE' }),
       invalidatesTags: ['Member'],
@@ -445,6 +466,7 @@ export const {
   useGetIngestStatusQuery,
   useGetMembersQuery,
   useAddMembersMutation,
+  useSetSourceAccessMutation,
   useRemoveMemberMutation,
   useGetMyBriefQuery,
   useGetBriefsQuery,

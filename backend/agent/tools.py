@@ -432,7 +432,7 @@ async def fetch_confluence(base_url: str, email: str, api_token: str, space_key:
     return results
 
 
-def make_inventory_tool(workspace_id: str, chroma_client):
+def make_inventory_tool(workspace_id: str, chroma_client, allowed_sources: list[str] | None = None):
     """
     Factory for `list_project_knowledge`.
 
@@ -456,8 +456,14 @@ def make_inventory_tool(workspace_id: str, chroma_client):
         collection = get_workspace_collection(chroma_client, workspace_id)
         if collection.count() == 0:
             return "Nothing is indexed for this project yet."
+        if allowed_sources is not None and not allowed_sources:
+            return "You have not been given access to any of this project's sources."
 
-        got = collection.get(include=["metadatas"])
+        got = (
+            collection.get(include=["metadatas"], where={"source_id": {"$in": allowed_sources}})
+            if allowed_sources is not None
+            else collection.get(include=["metadatas"])
+        )
         by_source: dict[str, dict[str, int]] = {}
         for meta in got["metadatas"]:
             label = meta.get("source_label") or "Unknown source"
@@ -495,6 +501,7 @@ def make_search_tool(
     n_results: int = 8,
     passage_chars: int = 800,
     budget: int = 3,
+    allowed_sources: list[str] | None = None,
 ):
     """
     Factory that returns a (search_tool, captured_results) pair.
@@ -547,11 +554,24 @@ def make_search_tool(
         # Chunks are small enough to fit the embedder's window, so ask for more of
         # them — a section's answer is often split across two neighbouring chunks.
         n = min(n_results, count)
-        results = collection.query(
-            query_texts=[query],
-            n_results=n,
-            include=["documents", "metadatas", "distances"],
-        )
+        # Filtering happens in the query, not after it. Retrieving everything and
+        # then discarding what the asker may not see would mean a restricted
+        # person gets fewer results rather than different ones — and would leak
+        # the existence of the rest through the gaps.
+        query_args = {
+            "query_texts": [query],
+            "n_results": n,
+            "include": ["documents", "metadatas", "distances"],
+        }
+        if allowed_sources is not None:
+            if not allowed_sources:
+                return (
+                    "You have not been given access to any of this project's sources. "
+                    "Ask the project owner."
+                )
+            query_args["where"] = {"source_id": {"$in": allowed_sources}}
+
+        results = collection.query(**query_args)
 
         ids = results["ids"][0]
         docs = results["documents"][0]

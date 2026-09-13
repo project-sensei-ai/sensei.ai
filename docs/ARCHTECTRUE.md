@@ -63,7 +63,7 @@ Three layers, kept simple.
 |---|---|---|
 | Login | OAuth (Google, GitHub, Microsoft) | Email + password, plus Google |
 | Roles | Owner, Admin, Member, Viewer | Owner + Member, both enforced |
-| Source perms | Per-user, per-item ACL filtering | Owner writes, members read. No per-item ACL — every member sees the same corpus |
+| Source perms | Per-item ACLs synced from each source | Per-**source** visibility per member, enforced in the vector query. Not yet per document within a source |
 | Token storage | KMS envelope encryption | Fernet at rest via `SECRET_ENCRYPTION_KEY`. The key lives in the environment, not a KMS |
 | Freshness | Webhook-driven | Re-ingest on demand; an audit runs when a source lands |
 

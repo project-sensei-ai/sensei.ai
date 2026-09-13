@@ -92,17 +92,23 @@ def _build_model(background: bool = False):
     )
 
 
-def build_agent(workspace_id: str, chroma_client, session_manager=None):
+def build_agent(workspace_id: str, chroma_client, session_manager=None,
+                allowed_sources: list[str] | None = None):
     """
     Build a Strands Agent for the given workspace.
     Returns (agent, captured_citations_list).
     The citations list is populated in-place when the agent calls search_project_docs.
     Pass session_manager (e.g. S3SessionManager) to give the agent persistent conversation memory.
+
+    allowed_sources restricts what this particular asker can be answered from.
+    None means everything — owners, and members the owner has not narrowed.
     """
-    search_tool, captured = make_search_tool(workspace_id, chroma_client)
+    search_tool, captured = make_search_tool(
+        workspace_id, chroma_client, allowed_sources=allowed_sources
+    )
     model = _build_model()
 
-    tools = [search_tool, make_inventory_tool(workspace_id, chroma_client)]
+    tools = [search_tool, make_inventory_tool(workspace_id, chroma_client, allowed_sources)]
     if settings.BEDROCK_KB_ID:
         tools.append(search_knowledge_base)
 

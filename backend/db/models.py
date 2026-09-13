@@ -39,6 +39,8 @@ def serialize_member(doc: dict, user: dict | None = None, invite_url: str | None
         "status": doc.get("status", "active"),
         "invited_at": _iso(doc.get("invited_at")),
         "joined_at": _iso(doc.get("joined_at")),
+        # null = every source. A list narrows what they are answered from.
+        "source_access": doc.get("source_access"),
     }
     if user:
         out["email"] = user.get("email")
