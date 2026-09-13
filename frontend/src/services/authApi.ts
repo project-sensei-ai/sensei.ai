@@ -38,6 +38,15 @@ interface CredentialsArgs {
 export function errorMessage(err: unknown): string {
   const detail = (err as { data?: { detail?: unknown } })?.data?.detail
   if (typeof detail === 'string') return detail
+  // FastAPI returns 422 validation errors as an array of objects. Handing that
+  // straight to a React text node throws; pull the messages out instead.
+  if (Array.isArray(detail)) {
+    const msgs = detail
+      .map((d) => (typeof d === 'string' ? d : (d as { msg?: string })?.msg))
+      .filter(Boolean)
+      .map((m) => String(m).replace(/^Value error,\s*/, ''))
+    if (msgs.length) return msgs.join(' ')
+  }
   return 'Something went wrong. Please try again.'
 }
 

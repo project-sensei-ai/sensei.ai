@@ -1,10 +1,10 @@
 import os
 from datetime import datetime, timezone
-from typing import Literal
+from typing import Annotated, Literal, Union
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from auth.deps import get_current_user
 from core.config import settings
@@ -42,8 +42,70 @@ class ConfluenceSourceIn(BaseModel):
     space_key: str
     label: str = ""
 
+    @field_validator("base_url")
+    @classmethod
+    def _looks_like_a_site(cls, v: str) -> str:
+        v = v.strip().rstrip("/")
+        if not v.startswith(("http://", "https://")):
+            raise ValueError(
+                "Confluence site must be a URL, like https://your-org.atlassian.net/wiki "
+                "— copy it from the address bar of your Confluence tab"
+            )
+        return v
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
+async def _verify_confluence(body) -> None:
+    """
+    Confirm the site answers, the credentials work, and the space exists —
+    before anything is stored. Each failure gets a message that says what to do,
+    and a wrong space key lists the keys that actually exist.
+    """
+    import base64 as _b64
+    import httpx as _httpx
+
+    base = body.base_url.rstrip("/")
+    space_key = body.space_key.strip().upper()
+    auth = _b64.b64encode(f"{body.email}:{body.api_token}".encode()).decode()
+    headers = {"Authorization": f"Basic {auth}", "Accept": "application/json"}
+
+    async with _httpx.AsyncClient(headers=headers, timeout=15, follow_redirects=True) as c:
+        try:
+            r = await c.get(f"{base}/rest/api/space", params={"limit": 100})
+        except Exception as exc:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                f"Couldn't reach {base} — check the site address. ({exc.__class__.__name__})",
+            )
+
+        if r.status_code in (401, 403):
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "Confluence rejected those credentials. The email must be the Atlassian "
+                "account that created the API token, and the token must not have expired.",
+            )
+        if r.status_code == 404 or "application/json" not in r.headers.get("content-type", ""):
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                f"{base} doesn't look like a Confluence site. The address usually ends in "
+                "/wiki, for example https://your-org.atlassian.net/wiki",
+            )
+        if r.status_code != 200:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                f"Confluence returned {r.status_code} when listing spaces.",
+            )
+
+        keys = [s.get("key", "") for s in r.json().get("results", [])]
+        if space_key not in keys:
+            visible = ", ".join(k for k in keys if k and not k.startswith("~")) or "none"
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                f"No space with key '{space_key}' is visible to this account. "
+                f"Spaces it can see: {visible}",
+            )
+
 
 def _source_doc(workspace_id: str, source_type: str, label: str, config: dict, config_secret: dict | None = None) -> dict:
     now = datetime.now(timezone.utc)
@@ -67,7 +129,14 @@ def _source_doc(workspace_id: str, source_type: str, label: str, config: dict, c
 
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def add_source(
-    body: GithubSourceIn | UrlSourceIn | ConfluenceSourceIn,
+    # Discriminated on `type`, so a bad Confluence field reports the Confluence
+    # error. Without the discriminator pydantic tries each variant in turn and
+    # surfaces the first one's complaint ("Input should be 'github'"), which
+    # tells the user nothing about what they actually got wrong.
+    body: Annotated[
+        Union[GithubSourceIn, UrlSourceIn, ConfluenceSourceIn],
+        Field(discriminator="type"),
+    ],
     user=Depends(get_current_user),
     db=Depends(get_db),
 ):
@@ -99,8 +168,12 @@ async def add_source(
         doc = _source_doc(ws["_id"], "url", label, config)
 
     elif body.type == "confluence":
-        label = body.label or f"Confluence:{body.space_key}"
-        config = {"base_url": body.base_url, "space_key": body.space_key, "email": body.email}
+        # Check the credentials now rather than failing in a background task four
+        # seconds later with an httpx message nobody can act on.
+        await _verify_confluence(body)
+        space_key = body.space_key.strip().upper()
+        label = body.label or f"Confluence: {space_key}"
+        config = {"base_url": body.base_url, "space_key": space_key, "email": body.email}
         config_secret = {"api_token": body.api_token}
         doc = _source_doc(ws["_id"], "confluence", label, config, config_secret)
 

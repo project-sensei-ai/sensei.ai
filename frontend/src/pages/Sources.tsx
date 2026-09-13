@@ -14,6 +14,7 @@ import {
   X,
 } from 'lucide-react'
 import { AppShell } from '@/components/AppShell'
+import { errorMessage } from '@/services/authApi'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -166,7 +167,7 @@ function AddSourcePanel({ onClose }: { onClose: () => void }) {
         const res = await uploadFile(fd).unwrap()
         await triggerIngest(res.source.id).unwrap().catch(() => {})
       } catch (e: any) {
-        setFileErr(e?.data?.detail || `Failed to upload ${file.name}`)
+        setFileErr(errorMessage(e) || `Failed to upload ${file.name}`)
       }
     }
     setUploading(false)
@@ -186,7 +187,7 @@ function AddSourcePanel({ onClose }: { onClose: () => void }) {
       await triggerIngest(res.source.id).unwrap().catch(() => {})
       onClose()
     } catch (e: any) {
-      setUrlErr(e?.data?.detail || 'Failed to add URLs')
+      setUrlErr(errorMessage(e))
     } finally { setUrlBusy(false) }
   }
 
@@ -216,7 +217,7 @@ function AddSourcePanel({ onClose }: { onClose: () => void }) {
       await triggerIngest(res.source.id).unwrap().catch(() => {})
       onClose()
     } catch (e: any) {
-      setGhErr(e?.data?.detail || 'Failed to add GitHub repo')
+      setGhErr(errorMessage(e))
     } finally { setGhBusy(false) }
   }
 
@@ -235,7 +236,7 @@ function AddSourcePanel({ onClose }: { onClose: () => void }) {
       await triggerIngest(res.source.id).unwrap().catch(() => {})
       onClose()
     } catch (e: any) {
-      setConfErr(e?.data?.detail || 'Failed to connect Confluence')
+      setConfErr(errorMessage(e))
     } finally { setConfBusy(false) }
   }
 

@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { errorMessage } from '@/services/authApi'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -155,7 +156,7 @@ function GithubTab({ onAdd, addSource }: any) {
       setRepos([])
       setSearch('')
     } catch (e: any) {
-      setErr(e?.data?.detail || 'Failed to add source')
+      setErr(errorMessage(e) || 'Failed to add source')
     } finally { setBusy(false) }
   }
 
@@ -278,7 +279,7 @@ function FileTab({ onAdd, uploadFile }: any) {
         const res = await uploadFile(fd).unwrap()
         onAdd(res.source)
       } catch (e: any) {
-        setErr(e?.data?.detail || `Failed to upload ${file.name}`)
+        setErr(errorMessage(e) || `Failed to upload ${file.name}`)
       }
     }
     setBusy(false)
@@ -327,7 +328,7 @@ function UrlTab({ onAdd, addSource }: any) {
       onAdd(res.source)
       setRaw('')
     } catch (e: any) {
-      setErr(e?.data?.detail || 'Failed to add URLs')
+      setErr(errorMessage(e) || 'Failed to add URLs')
     } finally { setBusy(false) }
   }
 
@@ -367,7 +368,7 @@ function ConfluenceTab({ onAdd, addSource }: any) {
       onAdd(res.source)
       setForm({ base_url: '', email: '', api_token: '', space_key: '' })
     } catch (e: any) {
-      setErr(e?.data?.detail || 'Failed to add Confluence source')
+      setErr(errorMessage(e) || 'Failed to add Confluence source')
     } finally { setBusy(false) }
   }
 
