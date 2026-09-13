@@ -46,7 +46,9 @@ _KNOWN = [
 ]
 
 
-_QUOTA = re.compile(r"tokens per day|TPD|daily limit", re.I)
+# A daily cap, or a request this model's per-minute allowance can never fit —
+# either way the fix is another model, not a retry.
+_QUOTA = re.compile(r"tokens per day|TPD|daily limit|Request too large", re.I)
 _MODEL_IN_ERROR = re.compile(r"model `([^`]+)`|model ([\w./-]+)", re.I)
 
 

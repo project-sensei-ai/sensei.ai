@@ -210,7 +210,13 @@ async def scan_gaps(db, chroma_client, workspace_id: str, force: bool = False) -
             if now - last < RESCAN_DEBOUNCE and existing.get("status") != "error":
                 return
         if existing.get("status") == "scanning":
-            return
+            # A run that died with the process leaves "scanning" behind; do not
+            # let a ghost block every future audit.
+            started = existing.get("updated_at")
+            if started is not None and started.tzinfo is None:
+                started = started.replace(tzinfo=timezone.utc)
+            if started is not None and now - started < timedelta(minutes=15):
+                return
 
     await db.gap_reports.update_one(
         {"workspace_id": workspace_id},
