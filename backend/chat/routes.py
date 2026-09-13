@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from agent.agent import build_agent, make_session_manager
 from answers import store as answer_store
 from auth.deps import get_current_user
+from core.errors import humanise
 from db.chroma import get_chroma
 from db.database import get_db
 from db.membership import require_workspace
@@ -211,7 +212,7 @@ async def stream_message(
         except Exception as exc:
             # The stream has already started, so an HTTP error code is no longer
             # available — the failure has to travel as an event.
-            yield _sse({"type": "error", "message": str(exc)[:300]})
+            yield _sse({"type": "error", "message": humanise(exc)})
 
     return StreamingResponse(
         events(),

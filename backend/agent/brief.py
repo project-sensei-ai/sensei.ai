@@ -23,6 +23,7 @@ from strands.multiagent import GraphBuilder
 
 from agent.agent import _build_model
 from core.config import settings
+from core.errors import humanise
 from agent.tools import make_inventory_tool, make_search_tool
 from agent import usage
 
@@ -253,7 +254,7 @@ async def generate_brief(db, chroma_client, workspace_id: str, user_id: str) -> 
     except Exception as exc:
         await db.briefs.update_one(
             {"workspace_id": workspace_id, "user_id": user_id},
-            {"$set": {"status": "error", "error_message": str(exc)[:400],
+            {"$set": {"status": "error", "error_message": humanise(exc),
                       "updated_at": datetime.now(timezone.utc)}},
         )
         print(f"[brief] failed for {person}: {exc}")

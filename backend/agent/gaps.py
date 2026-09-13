@@ -23,6 +23,7 @@ from agent.agent import _build_model
 from agent.tools import make_inventory_tool, make_search_tool
 from agent import usage
 from core.config import settings
+from core.errors import humanise
 
 RESCAN_DEBOUNCE = timedelta(minutes=10)
 
@@ -232,7 +233,7 @@ async def scan_gaps(db, chroma_client, workspace_id: str, force: bool = False) -
     except Exception as exc:
         await db.gap_reports.update_one(
             {"workspace_id": workspace_id},
-            {"$set": {"status": "error", "error_message": str(exc)[:400],
+            {"$set": {"status": "error", "error_message": humanise(exc),
                       "updated_at": datetime.now(timezone.utc)}},
         )
         print(f"[gaps] audit failed for {workspace_id}: {exc}")
@@ -345,7 +346,7 @@ async def draft_for_gap(db, chroma_client, workspace_id: str, gap_id: str) -> No
     except Exception as exc:
         await db.drafts.update_one(
             {"workspace_id": workspace_id, "gap_id": gap_id},
-            {"$set": {"status": "error", "error_message": str(exc)[:400],
+            {"$set": {"status": "error", "error_message": humanise(exc),
                       "updated_at": datetime.now(timezone.utc)}},
         )
         print(f"[gaps] draft failed: {exc}")
