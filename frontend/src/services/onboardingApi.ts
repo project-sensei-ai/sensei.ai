@@ -94,6 +94,8 @@ export interface Brief {
   /** Set when the project moved after this brief was written. */
   stale_reason?: string | null
   stale_at?: string | null
+  /** The last refresh failed; the brief shown is the last good one. */
+  refresh_error?: string | null
   created_at: string | null
   updated_at: string | null
 }
@@ -118,6 +120,7 @@ export interface GapReport {
   summary: string | null
   gaps: Gap[]
   error_message: string | null
+  refresh_error?: string | null
   updated_at: string | null
 }
 

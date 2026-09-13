@@ -240,9 +240,13 @@ async def scan_gaps(db, chroma_client, workspace_id: str, force: bool = False) -
         )
         print(f"[gaps] {len(gaps)} gap(s) found in workspace {workspace_id}")
     except Exception as exc:
+        current = await db.gap_reports.find_one({"workspace_id": workspace_id})
+        has_report = bool((current or {}).get("gaps"))
         await db.gap_reports.update_one(
             {"workspace_id": workspace_id},
-            {"$set": {"status": "error", "error_message": humanise(exc),
+            {"$set": {"status": "ready" if has_report else "error",
+                      "error_message": None if has_report else humanise(exc),
+                      "refresh_error": humanise(exc) if has_report else None,
                       "updated_at": datetime.now(timezone.utc)}},
         )
         print(f"[gaps] audit failed for {workspace_id}: {exc}")

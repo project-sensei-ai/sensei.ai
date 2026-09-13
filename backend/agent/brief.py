@@ -256,9 +256,15 @@ async def generate_brief(db, chroma_client, workspace_id: str, user_id: str) -> 
         )
         print(f"[brief] wrote onboarding brief for {person} in {workspace.get('name')}")
     except Exception as exc:
+        # A refresh that fails must not take a good brief off the page. Keep
+        # the last one readable and say the refresh did not happen.
+        current = await db.briefs.find_one({"workspace_id": workspace_id, "user_id": user_id})
+        has_brief = bool((current or {}).get("brief"))
         await db.briefs.update_one(
             {"workspace_id": workspace_id, "user_id": user_id},
-            {"$set": {"status": "error", "error_message": humanise(exc),
+            {"$set": {"status": "ready" if has_brief else "error",
+                      "error_message": None if has_brief else humanise(exc),
+                      "refresh_error": humanise(exc) if has_brief else None,
                       "updated_at": datetime.now(timezone.utc)}},
         )
         print(f"[brief] failed for {person}: {exc}")

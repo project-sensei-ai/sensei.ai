@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
-import { Activity, Bell, KeyRound, MessageSquare, Database, Sparkles, Users, X, Loader2 } from 'lucide-react'
+import { Activity, Bell, KeyRound, MessageSquare, Database, Sparkles, Users, X, Loader2, Wrench, Video } from 'lucide-react'
 import { AppShell } from '@/components/AppShell'
 import TeamPanel from '@/components/TeamPanel'
 import ActivityFeed from '@/components/ActivityFeed'
@@ -45,10 +45,24 @@ const overviewCards = [
     ownerOnly: false,
   },
   {
+    title: 'Tools',
+    description: 'What it can do: MCP servers the owner connected, writes gated',
+    to: '/tools',
+    icon: Wrench,
+    ownerOnly: false,
+  },
+  {
     title: 'Chat',
-    description: 'Ask anything about the project — every answer cites its source',
+    description: 'Ask, or ask for work — cited answers, spreadsheets, live Jira',
     to: '/chat',
     icon: MessageSquare,
+    ownerOnly: false,
+  },
+  {
+    title: 'Meetings',
+    description: 'Bring it into a call — it answers when asked and corrects when sure',
+    to: '/meetings',
+    icon: Video,
     ownerOnly: false,
   },
 ]

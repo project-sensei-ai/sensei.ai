@@ -228,6 +228,11 @@ export default function Gaps() {
           </Card>
         ) : (
           <>
+            {report.refresh_error && (
+              <p className="rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">
+                The last audit did not complete — {report.refresh_error} This is the last good report.
+              </p>
+            )}
             {report.summary && (
               <Card className="border-dashed">
                 <CardHeader className="pb-3">

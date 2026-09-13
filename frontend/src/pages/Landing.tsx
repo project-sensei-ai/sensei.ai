@@ -8,9 +8,9 @@ import {
 } from '@/components/ui/card'
 
 const features = [
-  { title: 'Sources', description: 'Confluence, GitHub, Jira, Teams' },
-  { title: 'Memory', description: 'Project context & decisions' },
-  { title: 'Chat', description: 'Cited, grounded answers' },
+  { title: 'Reads', description: 'GitHub, Confluence, Jira, files — cited' },
+  { title: 'Acts', description: 'Any MCP tool the owner grants; writes gated' },
+  { title: 'Sits in', description: 'Meetings — answers when asked, corrects when sure' },
 ]
 
 export default function Landing() {
@@ -20,7 +20,7 @@ export default function Landing() {
         <div className="text-center">
           <h1 className="text-4xl font-bold tracking-tight">Sensei</h1>
           <p className="text-muted-foreground mt-2">
-            Permission-aware project context platform
+            A colleague you onboard, not a chatbot you prompt.
           </p>
         </div>
 

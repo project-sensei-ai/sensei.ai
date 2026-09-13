@@ -115,6 +115,8 @@ def serialize_brief(doc: dict) -> dict:
         # Set when the watcher sees the project move under a brief written
         # against how it used to be.
         "stale_reason": doc.get("stale_reason"),
+        # The last refresh failed but the brief shown is still the last good one.
+        "refresh_error": doc.get("refresh_error"),
         "stale_at": _iso(doc.get("stale_at")),
         "created_at": _iso(doc.get("created_at")),
         "updated_at": _iso(doc.get("updated_at")),
@@ -129,6 +131,7 @@ def serialize_gap_report(doc: dict) -> dict:
         "summary": doc.get("summary"),
         "gaps": doc.get("gaps", []),
         "error_message": doc.get("error_message"),
+        "refresh_error": doc.get("refresh_error"),
         "created_at": _iso(doc.get("created_at")),
         "updated_at": _iso(doc.get("updated_at")),
     }
