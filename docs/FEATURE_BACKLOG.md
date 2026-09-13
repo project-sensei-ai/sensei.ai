@@ -27,7 +27,8 @@ what only the owner of the AWS account can unblock.
 | **6.2** | **Per-turn tool selection and pooled MCP sessions** | `toolgrants/registry.py`, `pool.py` |
 | **6.3** | **Work tools: spreadsheets and documents as downloads** | `agent/work.py`, `artifacts/` |
 | **6.4** | **`who_did_what` — person graph over activity records** | `agent/people.py` |
-| **6.5** | **Jira: live status tools + indexable project** | `agent/jira.py` |
+| **6.5** | **Jira: live status tools (`agent/jira.py`) + indexed issues and comments (`agent/tools.py`)** | both |
+| — | Slack channel indexing, with tests | `agent/tools.py`, `tests/test_slack.py` |
 | **7.1** | **Meeting companion — answer / correct / silent, with reasons** | `meetings/listener.py`, `/meetings` |
 | **7.2** | **Google Meet bot — captions in, chat replies out** | `meetings/meet_bot.py` |
 | **7.3** | **Meeting notes, typed and indexed; transcripts excluded from claim checks** | `meetings/routes.py`, `agent/tools.py` |
@@ -76,6 +77,6 @@ shipped generically — but *indexing* a system still needs ACLs.
 | **Any MCP server** | Shipped, generically. The owner's credential is the scope; the write gate is the floor. |
 | **Jira** | Shipped. Index for finding, read live for status. |
 | **Teams** | Highest value, most setup. Built except the transport. |
-| **Slack** | A bot reads only channels it was invited to — the cleanest consent story. Transport not built. |
+| **Slack** | Indexing shipped: one channel per source, the bot's invite is the grant. The channel *transport* (answering inside Slack) is not built. |
 | **GitHub App** (replacing the PAT) | The biggest security improvement available; makes per-item ACLs possible. |
 | **Google Drive / SharePoint** | Where documents live; expensive to do properly. After 2.7b. |

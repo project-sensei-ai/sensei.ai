@@ -2,10 +2,12 @@ import { useRef, useState } from 'react'
 import {
   AlertCircle,
   CheckCircle,
+  CircleDot,
   Clock,
   FolderGit2,
   Globe,
   Loader2,
+  MessageSquare,
   Plus,
   RefreshCw,
   ShieldCheck,
@@ -16,6 +18,7 @@ import {
 import { AppShell } from '@/components/AppShell'
 import { errorMessage } from '@/services/authApi'
 import { parseConfluenceUrl } from '@/lib/confluence'
+import FieldHelp from '@/components/FieldHelp'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -44,7 +47,8 @@ const TYPE_ICON: Record<string, React.ReactNode> = {
   url:        <Globe className="h-4 w-4 text-muted-foreground" />,
   file:       <Upload className="h-4 w-4 text-muted-foreground" />,
   confluence: <Globe className="h-4 w-4 text-muted-foreground" />,
-  jira:       <Globe className="h-4 w-4 text-muted-foreground" />,
+  jira:       <CircleDot className="h-4 w-4 text-muted-foreground" />,
+  slack:      <MessageSquare className="h-4 w-4 text-muted-foreground" />,
   meeting:    <Globe className="h-4 w-4 text-muted-foreground" />,
 }
 
@@ -87,11 +91,11 @@ function SourceCard({ source, canManage }: { source: Source; canManage: boolean 
           {cfg.icon} {cfg.label}
         </Badge>
 
-        {canManage && (source.status === 'pending' || source.status === 'error') && (
+        {canManage && (
           <Button size="sm" variant="outline" className="h-7 gap-1 text-xs"
             disabled={ingesting} onClick={() => triggerIngest(source.id)}>
             <RefreshCw className={`h-3 w-3 ${ingesting ? 'animate-spin' : ''}`} />
-            Ingest
+            {source.status === 'ready' ? 'Re-index' : 'Ingest'}
           </Button>
         )}
 
@@ -118,7 +122,7 @@ function SourceCard({ source, canManage }: { source: Source; canManage: boolean 
 
 // ── Add-source panel ───────────────────────────────────────────────────────────
 
-type Tab = 'file' | 'url' | 'github' | 'confluence' | 'jira'
+type Tab = 'file' | 'url' | 'github' | 'confluence' | 'jira' | 'slack'
 
 /** Personal space keys are case-sensitive and start with ~; only shout the rest. */
 function normaliseSpaceKey(v: string): string {
@@ -154,10 +158,15 @@ export function AddSourcePanel({ onClose, embedded = false }: { onClose: () => v
   const [confBusy, setConfBusy] = useState(false)
   const [confErr, setConfErr] = useState('')
 
-  // Jira — same Atlassian token as Confluence, a different endpoint.
+  // Jira
   const [jira, setJira] = useState({ base_url: '', email: '', api_token: '', project_key: '' })
   const [jiraBusy, setJiraBusy] = useState(false)
   const [jiraErr, setJiraErr] = useState('')
+
+  // Slack
+  const [slack, setSlack] = useState({ token: '', channel: '' })
+  const [slackBusy, setSlackBusy] = useState(false)
+  const [slackErr, setSlackErr] = useState('')
 
   // GitHub
   const [pat, setPat] = useState('')
@@ -259,6 +268,18 @@ export function AddSourcePanel({ onClose, embedded = false }: { onClose: () => v
     } finally { setConfBusy(false) }
   }
 
+  const setConfField = (k: keyof typeof conf) => (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value
+    if (k === 'base_url') {
+      // Pasting a page URL fills the space key too, rather than making them
+      // pick the site and the key out of the same string themselves.
+      const { site, spaceKey } = parseConfluenceUrl(value)
+      setConf((c) => ({ ...c, base_url: site, space_key: spaceKey ?? c.space_key }))
+      return
+    }
+    setConf((c) => ({ ...c, [k]: value }))
+  }
+
   async function handleJira(e: React.FormEvent) {
     e.preventDefault()
     setJiraErr('')
@@ -278,19 +299,38 @@ export function AddSourcePanel({ onClose, embedded = false }: { onClose: () => v
     } finally { setJiraBusy(false) }
   }
 
-  const setJiraField = (k: keyof typeof jira) => (e: React.ChangeEvent<HTMLInputElement>) =>
-    setJira((j) => ({ ...j, [k]: e.target.value }))
-
-  const setConfField = (k: keyof typeof conf) => (e: React.ChangeEvent<HTMLInputElement>) => {
+  const setJiraField = (k: keyof typeof jira) => (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value
     if (k === 'base_url') {
-      // Pasting a page URL fills the space key too, rather than making them
-      // pick the site and the key out of the same string themselves.
-      const { site, spaceKey } = parseConfluenceUrl(value)
-      setConf((c) => ({ ...c, base_url: site, space_key: spaceKey ?? c.space_key }))
+      // Pasting a ticket URL drops everything after /browse/ — the site is all we need.
+      const site = value.trim().replace(/\/browse\/.*$/, '').replace(/\/+$/, '')
+      setJira((c) => ({ ...c, base_url: site }))
       return
     }
-    setConf((c) => ({ ...c, [k]: value }))
+    setJira((c) => ({ ...c, [k]: value }))
+  }
+
+  async function handleSlack(e: React.FormEvent) {
+    e.preventDefault()
+    setSlackErr('')
+    setSlackBusy(true)
+    try {
+      const channel = slack.channel.trim().toLowerCase().replace(/^#/, '')
+      const res = await addSource({
+        type: 'slack',
+        token: slack.token,
+        channel,
+        label: `Slack: #${channel}`,
+      }).unwrap()
+      await triggerIngest(res.source.id).unwrap().catch(() => {})
+      onClose()
+    } catch (e: any) {
+      setSlackErr(errorMessage(e))
+    } finally { setSlackBusy(false) }
+  }
+
+  const setSlackField = (k: keyof typeof slack) => (e: React.ChangeEvent<HTMLInputElement>) => {
+    setSlack((c) => ({ ...c, [k]: e.target.value }))
   }
 
   const TABS: { id: Tab; label: string }[] = [
@@ -299,6 +339,7 @@ export function AddSourcePanel({ onClose, embedded = false }: { onClose: () => v
     { id: 'github', label: 'GitHub' },
     { id: 'confluence', label: 'Confluence' },
     { id: 'jira', label: 'Jira' },
+    { id: 'slack', label: 'Slack' },
   ]
 
   return (
@@ -356,7 +397,10 @@ export function AddSourcePanel({ onClose, embedded = false }: { onClose: () => v
       {tab === 'url' && (
         <form onSubmit={handleUrl} className="flex flex-col gap-3">
           <div className="flex flex-col gap-1.5">
-            <Label>URLs <span className="text-muted-foreground text-xs">(one per line)</span></Label>
+            <Label className="flex items-center gap-1">
+              URLs <span className="text-muted-foreground text-xs">(one per line)</span>
+              <FieldHelp text="Paste the exact public pages to index — one URL per line. Each must be reachable without a login (it is checked before saving)." />
+            </Label>
             <textarea
               className="border-input bg-background placeholder:text-muted-foreground focus-visible:ring-ring flex min-h-[100px] w-full rounded-md border px-3 py-2 text-sm focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none disabled:opacity-50"
               placeholder="https://docs.example.com"
@@ -377,7 +421,10 @@ export function AddSourcePanel({ onClose, embedded = false }: { onClose: () => v
         <form onSubmit={handleGithub} className="flex flex-col gap-3">
           {/* PAT + Fetch */}
           <div className="flex flex-col gap-1.5">
-            <Label>Personal Access Token</Label>
+            <Label className="flex items-center gap-1">
+              Personal Access Token
+              <FieldHelp text={'Create at github.com → Settings → Developer settings → Personal access tokens → Tokens (classic)\nNeeds scopes: repo, user, project'} />
+            </Label>
             <div className="flex gap-2">
               <Input
                 type="password" placeholder="ghp_..." value={pat}
@@ -401,7 +448,7 @@ export function AddSourcePanel({ onClose, embedded = false }: { onClose: () => v
 
           {repos.length > 0 && (
             <div className="flex flex-col gap-1.5">
-              <Label>Repository <span className="text-muted-foreground text-xs font-normal">({repos.length} found)</span></Label>
+              <Label className="flex items-center gap-1">Repository <span className="text-muted-foreground text-xs font-normal">({repos.length} found)</span></Label>
               <Input placeholder="Search…" value={repoSearch}
                 onChange={(e) => setRepoSearch(e.target.value)} className="mb-1" />
               <div className="max-h-44 overflow-y-auto rounded-md border divide-y">
@@ -424,7 +471,9 @@ export function AddSourcePanel({ onClose, embedded = false }: { onClose: () => v
 
           {repos.length === 0 && !fetchingRepos && (
             <div className="flex flex-col gap-1.5">
-              <Label>Repository <span className="text-muted-foreground text-xs font-normal">or enter manually</span></Label>
+              <Label className="flex items-center gap-1">Repository <span className="text-muted-foreground text-xs font-normal">or enter manually</span>
+                <FieldHelp text="Which repository to index, as owner/repo (e.g. your-org/your-app). Pick from the list above or type it in." />
+              </Label>
               <Input placeholder="owner/repo" value={selectedRepo}
                 onChange={(e) => setSelectedRepo(e.target.value)} required disabled={ghBusy} />
             </div>
@@ -446,7 +495,10 @@ export function AddSourcePanel({ onClose, embedded = false }: { onClose: () => v
         <form onSubmit={handleConfluence} className="flex flex-col gap-3">
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="flex flex-col gap-1.5 sm:col-span-2">
-              <label className="text-xs font-medium">Confluence site</label>
+              <label className="text-xs font-medium flex items-center gap-1">
+                Confluence site
+                <FieldHelp text="Your wiki address, ending in /wiki — e.g. https://your-org.atlassian.net/wiki. Pasting any page URL fills the site and space key for you." />
+              </label>
               <Input placeholder="https://your-org.atlassian.net/wiki"
                 value={conf.base_url} onChange={setConfField('base_url')} required disabled={confBusy} />
               <p className="text-xs text-muted-foreground">
@@ -454,17 +506,30 @@ export function AddSourcePanel({ onClose, embedded = false }: { onClose: () => v
               </p>
             </div>
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-medium">Account email</label>
+              <label className="text-xs font-medium flex items-center gap-1">
+                Account email
+                <FieldHelp text="The Atlassian account email that owns the API token. Sensei authenticates with this same identity." />
+              </label>
               <Input type="email" placeholder="agent@your-org.com"
                 value={conf.email} onChange={setConfField('email')} required disabled={confBusy} />
             </div>
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-medium">Space key</label>
+              <label className="text-xs font-medium flex items-center gap-1">
+                Space key
+                <FieldHelp text="The 2-4 letter code identifying the space to index (e.g. ENG). Pasting a page URL fills it automatically." />
+              </label>
               <Input placeholder="ENG" value={conf.space_key}
                 onChange={setConfField('space_key')} required disabled={confBusy} />
             </div>
             <div className="flex flex-col gap-1.5 sm:col-span-2">
-              <label className="text-xs font-medium">API token</label>
+              <label className="text-xs font-medium flex items-center gap-1">
+                API token
+                <FieldHelp text={
+                  '1. Go to id.atlassian.com → Security → API tokens → Create token\n' +
+                  '2. Copy it immediately (shown only once)\n' +
+                  '3. Paste and pair with the account email above — the token authorises as that exact account'
+                } />
+              </label>
               <Input type="password" placeholder="Paste the token"
                 value={conf.api_token} onChange={setConfField('api_token')} required disabled={confBusy} />
               <p className="text-xs text-muted-foreground">
@@ -510,46 +575,145 @@ export function AddSourcePanel({ onClose, embedded = false }: { onClose: () => v
       )}
 
       {/* ── Jira tab ──
-          Same site, same account, same token as Confluence. Indexing makes
-          tickets findable by topic; status is always read live. */}
+          Same Atlassian identity as Confluence, a different endpoint. A project
+          key narrows what Sensei *reads*, but the token authorises as its owner —
+          identical ceiling/floor story. */}
       {tab === 'jira' && (
         <form onSubmit={handleJira} className="flex flex-col gap-3">
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="flex flex-col gap-1.5 sm:col-span-2">
-              <label className="text-xs font-medium">Jira site</label>
+              <label className="text-xs font-medium flex items-center gap-1">
+                Jira site
+                <FieldHelp text="Your site is the root address you log into — everything after the '?' is redirect noise. Example: https://your-org.atlassian.net" />
+              </label>
               <Input placeholder="https://your-org.atlassian.net"
                 value={jira.base_url} onChange={setJiraField('base_url')} required disabled={jiraBusy} />
             </div>
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-medium">Account email</label>
+              <label className="text-xs font-medium flex items-center gap-1">
+                Account email
+                <FieldHelp text="The Atlassian account email that owns the API token. Sensei authenticates with this same identity." />
+              </label>
               <Input type="email" placeholder="agent@your-org.com"
                 value={jira.email} onChange={setJiraField('email')} required disabled={jiraBusy} />
             </div>
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-medium">Project key</label>
+              <label className="text-xs font-medium flex items-center gap-1">
+                Project key
+                <FieldHelp text="The short uppercase code identifying your Jira project (e.g. PD, SCRUM). Found on the board or in its URL after /projects/. Create one if you have none." />
+              </label>
               <Input placeholder="PROJ" value={jira.project_key}
-                onChange={setJiraField('project_key')} required disabled={jiraBusy} />
+                onChange={(e) => setJira((c) => ({ ...c, project_key: e.target.value.toUpperCase() }))}
+                required disabled={jiraBusy} />
             </div>
             <div className="flex flex-col gap-1.5 sm:col-span-2">
-              <label className="text-xs font-medium">API token</label>
-              <Input type="password" placeholder="Same token as Confluence works"
+              <label className="text-xs font-medium flex items-center gap-1">
+                API token
+                <FieldHelp text={
+                  '1. Go to id.atlassian.com → Security → API tokens → Create token\n' +
+                  '2. Copy it immediately (shown only once)\n' +
+                  '3. Paste and pair with the account email above — the token authorises as that exact account'
+                } />
+              </label>
+              <Input type="password" placeholder="Paste the token"
                 value={jira.api_token} onChange={setJiraField('api_token')} required disabled={jiraBusy} />
+              <p className="text-xs text-muted-foreground">
+                The same Atlassian token works for both Confluence and Jira. Create one at{' '}
+                <a href="https://id.atlassian.com/manage-profile/security/api-tokens"
+                   target="_blank" rel="noreferrer"
+                   className="underline underline-offset-2 hover:text-foreground">
+                  id.atlassian.com → Security → API tokens
+                </a>.
+              </p>
             </div>
           </div>
+
           <div className="rounded-lg border bg-muted/30 p-3 text-xs leading-relaxed">
             <p className="flex items-center gap-1.5 font-medium text-foreground">
               <ShieldCheck className="h-3.5 w-3.5" /> What this grants
             </p>
             <ul className="mt-2 flex flex-col gap-1 text-muted-foreground">
-              <li><span className="text-foreground">Sensei reads:</span> issues in {jira.project_key.trim().toUpperCase() || 'PROJ'}, indexed for finding; status is looked up live so an answer is never a day old.</li>
-              <li><span className="text-foreground">The token could reach:</span> everything that account can see across Jira and Confluence.</li>
-              <li><span className="text-foreground">It cannot:</span> create, transition or comment on issues. Writes go through Tools, where you decide.</li>
+              <li>
+                <span className="text-foreground">Sensei reads:</span> issues in the{' '}
+                <span className="font-mono">{jira.project_key.trim().toUpperCase() || 'PROJ'}</span>{' '}
+                project only. Nothing else is fetched or indexed.
+              </li>
+              <li>
+                <span className="text-foreground">The token could reach:</span> everything
+                that account can see in Jira. A token authorises as its owner —
+                Atlassian has no way to narrow it to one project.
+              </li>
+              <li>
+                <span className="text-foreground">So:</span> use a dedicated Atlassian
+                account invited only to the projects this work involves. Then the limit
+                is enforced by Jira, not just by us.
+              </li>
             </ul>
           </div>
+
           {jiraErr && <p className="text-xs text-destructive">{jiraErr}</p>}
           <Button type="submit" size="sm"
             disabled={jiraBusy || !jira.base_url || !jira.email || !jira.api_token || !jira.project_key}>
             {jiraBusy ? <><Loader2 className="h-4 w-4 animate-spin mr-1" /> Connecting…</> : 'Connect project'}
+          </Button>
+        </form>
+      )}
+
+      {/* ── Slack tab ──
+          The cleanest consent story of any connector: adding the bot to a
+          channel IS the grant, removing it IS the revocation. The floor is the
+          one channel we read; the ceiling is every channel the app is in. */}
+      {tab === 'slack' && (
+        <form onSubmit={handleSlack} className="flex flex-col gap-3">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="flex flex-col gap-1.5 sm:col-span-2">
+              <label className="text-xs font-medium flex items-center gap-1">
+                Bot token
+                <FieldHelp text={
+                  '1. Open api.slack.com/apps → Create New App → From scratch\n' +
+                  '2. Under OAuth & Permissions add scope channels:history, channels:read, groups:history, users:read\n' +
+                  '3. Install to Workspace → copy the xoxb-… OAuth token'
+                } />
+              </label>
+              <Input type="password" placeholder="xoxb-…"
+                value={slack.token} onChange={setSlackField('token')} required disabled={slackBusy} />
+            </div>
+            <div className="flex flex-col gap-1.5 sm:col-span-2">
+              <label className="text-xs font-medium flex items-center gap-1">
+                Channel
+                <FieldHelp text="The channel to index, e.g. general. The bot must be added to it — open the channel → Details → Add apps." />
+              </label>
+              <Input placeholder="general"
+                value={slack.channel} onChange={setSlackField('channel')} required disabled={slackBusy} />
+            </div>
+          </div>
+
+          <div className="rounded-lg border bg-muted/30 p-3 text-xs leading-relaxed">
+            <p className="flex items-center gap-1.5 font-medium text-foreground">
+              <ShieldCheck className="h-3.5 w-3.5" /> What this grants
+            </p>
+            <ul className="mt-2 flex flex-col gap-1 text-muted-foreground">
+              <li>
+                <span className="text-foreground">Sensei reads:</span> #{slack.channel.trim().replace(/^#/, '') || 'channel'}{' '}
+                only. Nothing else is fetched or indexed.
+              </li>
+              <li>
+                <span className="text-foreground">The token could reach:</span> every channel
+                this Slack app has been added to — Slack cannot narrow a bot token
+                to one channel.
+              </li>
+              <li>
+                <span className="text-foreground">So:</span> add the bot to only the channels
+                this work involves. The invite is the grant; removing the app is
+                the revocation.
+              </li>
+            </ul>
+          </div>
+
+          {slackErr && <p className="text-xs text-destructive">{slackErr}</p>}
+          <Button type="submit" size="sm"
+            disabled={slackBusy || !slack.token || !slack.channel.trim()}>
+            {slackBusy ? <><Loader2 className="h-4 w-4 animate-spin mr-1" /> Connecting…</> : 'Connect channel'}
           </Button>
         </form>
       )}

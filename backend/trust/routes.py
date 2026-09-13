@@ -58,6 +58,14 @@ GRANTS = {
         "revoke": "Delete this source — the transcript goes with it",
         "improve": None,
     },
+    "slack": {
+        "credential": "Slack bot token",
+        "ceiling": "Every channel this Slack app has been added to",
+        "floor": "Messages and replies in the one channel named here",
+        "cannot": ["Post messages", "Channels the app was not added to", "Direct messages"],
+        "revoke": "Delete this source, or remove the app from the channel — the invite is the grant",
+        "improve": "Add the app only to the channels this project needs; Slack enforces the rest",
+    },
     "url": {
         "credential": "None",
         "ceiling": "Public web pages only",

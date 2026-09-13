@@ -17,6 +17,7 @@ import Tools from './pages/Tools'
 import Meetings from './pages/Meetings'
 import ProtectedRoute from './components/ProtectedRoute'
 import OnboardingRoute from './components/OnboardingRoute'
+import GuestRoute from './components/GuestRoute'
 
 const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined
 
@@ -26,8 +27,8 @@ function Router() {
       <Routes>
         {/* PUBLIC */}
         <Route path="/" element={<Landing />} />
-        <Route path="/login" element={<Login />} />
-        <Route path="/register" element={<Register />} />
+        <Route path="/login" element={<GuestRoute><Login /></GuestRoute>} />
+        <Route path="/register" element={<GuestRoute><Register /></GuestRoute>} />
 
         {/* INVITE LANDING — public; the page itself handles sign-in */}
         <Route path="/join" element={<Join />} />

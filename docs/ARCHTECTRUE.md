@@ -111,8 +111,8 @@ How content gets into the agent's memory.
 | **Jira** | Same Atlassian token | Issues in one project, indexed for finding; status read live via `jira_search` / `jira_issue` | ✅ Built |
 | **Meeting notes** | None | Transcript + typed summary of an ended meeting; excluded from claim checks | ✅ Built |
 | **MCP tool grant** | Bearer token / API key | Not indexed — *used*. Any MCP server's tools, classified read/write, gated by a Strands hook | ✅ Built |
+| **Slack** | Bot token | Messages and threaded replies in one channel the app was added to | ✅ Built |
 | SharePoint | MS Graph OAuth | Documents, folders | Future |
-| Slack | OAuth | Channel messages | Future |
 
 See `Agents.md` for the full list of data types fetched per source and the contributors vs collaborators distinction.
 

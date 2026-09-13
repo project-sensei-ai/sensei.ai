@@ -72,8 +72,21 @@ def _fingerprint(docs: list[dict]) -> dict[str, str]:
     return out
 
 
+async def _record_check(db, source: dict, fingerprint: dict[str, str]) -> None:
+    """Record which documents we last saw, so the next check can diff against it."""
+    await db.sources.update_one(
+        {"_id": source["_id"]},
+        {"$set": {
+            "content_fingerprint": fingerprint,
+            "last_checked_at": datetime.now(timezone.utc),
+        }},
+    )
+
+
 async def _fetch(source: dict) -> list[dict]:
-    from agent.tools import fetch_confluence, fetch_github, fetch_urls
+    from agent.tools import (
+        fetch_confluence, fetch_github, fetch_urls, fetch_jira, fetch_slack,
+    )
     secret = secrets.decrypt_dict(source.get("config_secret"))
     cfg = source.get("config", {})
     if source["type"] == "github":
@@ -85,12 +98,28 @@ async def _fetch(source: dict) -> list[dict]:
             base_url=cfg["base_url"], email=cfg["email"],
             api_token=secret.get("api_token", ""), space_key=cfg["space_key"],
         )
+    if source["type"] == "jira":
+        return await fetch_jira(
+            base_url=cfg["base_url"], email=cfg["email"],
+            api_token=secret.get("api_token", ""), project_key=cfg["project_key"],
+        )
+    if source["type"] == "slack":
+        return await fetch_slack(
+            bot_token=secret.get("token", ""),
+            channel_id=cfg["channel_id"],
+            channel_name=cfg["channel_name"],
+            team_domain=cfg["team_domain"],
+        )
     return []          # uploaded files cannot change underneath us
 
 
-async def check_source(db, source: dict) -> dict | None:
+async def check_source(db, chroma_client, source: dict) -> dict | None:
     """
     Re-read one source and report what moved. No model involved.
+
+    The live re-read exists to refresh the index, not just to nag: when content
+    moved, we rewrite that source's chunks from the freshly fetched docs first,
+    so answers stop being stale — then decide whether anyone needs telling.
 
     Returns None when nothing changed, which is the usual outcome.
     """
@@ -109,17 +138,20 @@ async def check_source(db, source: dict) -> dict | None:
     changed = [k for k in now if k in before and before[k] != now[k]]
     removed = [k for k in before if k not in now]
 
-    await db.sources.update_one(
-        {"_id": source["_id"]},
-        {"$set": {"content_fingerprint": now, "last_checked_at": datetime.now(timezone.utc)}},
-    )
-
-    if not (added or changed or removed):
+    if not before or not (added or changed or removed):
+        await _record_check(db, source, now)
         return None
 
-    # First sighting: recording the baseline is not a change worth reporting.
-    if not before:
+    try:
+        from agent.ingest import write_source_docs
+        await write_source_docs(db, chroma_client, source["_id"], docs)
+    except Exception as exc:
+        # Leave the fingerprint stale so the next cycle retries the re-index;
+        # forgetting the change would hide it forever.
+        print(f"[watch] re-index failed for {source.get('label')}: {humanise(exc)}")
         return None
+
+    await _record_check(db, source, now)
 
     excerpts = []
     for d in docs:
@@ -171,7 +203,7 @@ async def watch_workspace(db, chroma_client, workspace_id: str) -> dict:
     now = datetime.now(timezone.utc)
     changes = []
     async for source in db.sources.find({"workspace_id": workspace_id, "status": "ready"}):
-        found = await check_source(db, source)
+        found = await check_source(db, chroma_client, source)
         if found:
             changes.append(found)
 

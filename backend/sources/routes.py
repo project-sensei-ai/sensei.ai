@@ -51,8 +51,9 @@ class ConfluenceSourceIn(BaseModel):
         looking at, not the site root, so trim a full page URL down to the site:
             https://x.atlassian.net/wiki/spaces/ENG/pages/393218/Some+Doc
                  -> https://x.atlassian.net/wiki
+        Redirect URLs carry query strings (`?continue=...`) — drop those too.
         """
-        v = v.strip().rstrip("/")
+        v = v.strip().split("#")[0].split("?")[0].rstrip("/")
         if not v.startswith(("http://", "https://")):
             raise ValueError(
                 "Confluence site must be a URL, like https://your-org.atlassian.net/wiki "
@@ -70,49 +71,41 @@ class JiraSourceIn(BaseModel):
     base_url: str
     email: str
     api_token: str
-    project_key: str = Field(..., min_length=1, max_length=20)
+    project_key: str
     label: str = ""
 
     @field_validator("base_url")
     @classmethod
-    def _site(cls, v: str) -> str:
-        v = v.strip().rstrip("/")
+    def _looks_like_a_site(cls, v: str) -> str:
+        v = v.strip().split("#")[0].split("?")[0].rstrip("/")
         if not v.startswith(("http://", "https://")):
-            raise ValueError("Jira site must be a URL, like https://your-org.atlassian.net")
-        for marker in ("/wiki", "/jira", "/browse"):
-            idx = v.find(marker)
-            if idx != -1:
-                v = v[:idx]
+            raise ValueError(
+                "Jira site must be a URL, like https://your-org.atlassian.net"
+            )
+        # People paste the ticket they are looking at; cut it back to the site.
+        marker = "/browse/"
+        idx = v.find(marker)
+        if idx != -1:
+            v = v[:idx]
+        return v
+
+
+class SlackSourceIn(BaseModel):
+    type: Literal["slack"]
+    token: str = Field(..., min_length=1)
+    channel: str = Field(..., min_length=1)
+    label: str = ""
+
+    @field_validator("channel")
+    @classmethod
+    def _clean_channel(cls, v: str) -> str:
+        v = v.strip().lower().lstrip("#").strip()
+        if not v:
+            raise ValueError("Enter a channel name, like general")
         return v
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
-
-async def _verify_jira(body) -> None:
-    """The project must exist and the token must open it — checked in the form."""
-    import base64 as _b64
-    import httpx as _httpx
-
-    auth = _b64.b64encode(f"{body.email}:{body.api_token}".encode()).decode()
-    headers = {"Authorization": f"Basic {auth}", "Accept": "application/json"}
-    key = body.project_key.strip().upper()
-    async with _httpx.AsyncClient(headers=headers, timeout=15, follow_redirects=True) as c:
-        try:
-            r = await c.get(f"{body.base_url}/rest/api/3/project/{key}")
-        except Exception as exc:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
-                                f"Couldn't reach {body.base_url} — check the site address. ({exc.__class__.__name__})")
-        if r.status_code in (401, 403):
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
-                                "Jira rejected those credentials. The email must be the Atlassian account that created the API token.")
-        if r.status_code == 404:
-            lst = await c.get(f"{body.base_url}/rest/api/3/project/search", params={"maxResults": 50})
-            keys = ", ".join(p.get("key", "") for p in (lst.json().get("values", []) if lst.status_code == 200 else []))
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
-                                f"No Jira project with key '{key}'. Projects this account can see: {keys or 'none'}")
-        if r.status_code != 200:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"Jira returned {r.status_code} for project {key}.")
-
 
 async def _verify_confluence(body) -> None:
     """
@@ -179,6 +172,163 @@ async def _verify_confluence(body) -> None:
                 )
 
 
+async def _verify_jira(body) -> None:
+    """
+    Confirm the site answers, the credentials work, and the project exists —
+    before anything is stored. Same shape as the Confluence check; a wrong
+    project key lists the keys that actually exist.
+    """
+    import base64 as _b64
+    import httpx as _httpx
+
+    base = body.base_url.rstrip("/")
+    project_key = body.project_key.strip().upper()
+    auth = _b64.b64encode(f"{body.email}:{body.api_token}".encode()).decode()
+    headers = {"Authorization": f"Basic {auth}", "Accept": "application/json"}
+
+    async with _httpx.AsyncClient(headers=headers, timeout=15, follow_redirects=True) as c:
+        try:
+            r = await c.get(f"{base}/rest/api/3/myself")
+        except Exception as exc:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                f"Couldn't reach {base} — check the site address. ({exc.__class__.__name__})",
+            )
+
+        if r.status_code in (401, 403):
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                "Jira rejected those credentials. The email must be the Atlassian "
+                "account that created the API token, and the token must not have expired.",
+            )
+        if r.status_code == 404 or "application/json" not in r.headers.get("content-type", ""):
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                f"{base} doesn't look like a Jira site. The address is usually "
+                "https://your-org.atlassian.net",
+            )
+        if r.status_code != 200:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                f"Jira returned {r.status_code} when checking the account.",
+            )
+
+        project = await c.get(f"{base}/rest/api/3/project/{project_key}")
+        if project.status_code != 200:
+            listing = await c.get(
+                f"{base}/rest/api/3/project/search", params={"maxResults": 100}
+            )
+            visible = "; ".join(
+                p.get("key", "") for p in listing.json().get("values", []) if p.get("key")
+            ) or "none"
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                f"No project with key '{project_key}' is visible to this account. "
+                f"Projects it can see: {visible}",
+            )
+
+
+async def _verify_slack(body) -> dict:
+    """
+    Confirm the bot token works, the team answers, and the bot can see the
+    channel — before anything is stored. Returns what the source needs to read:
+    the team domain (for permalinks), the channel id, and its canonical name.
+    """
+    import httpx as _httpx
+
+    headers = {"Authorization": f"Bearer {body.token}", "Content-Type": "application/json"}
+
+    async with _httpx.AsyncClient(headers=headers, timeout=15) as c:
+        try:
+            r = await c.get("https://slack.com/api/auth.test")
+        except Exception as exc:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                f"Couldn't reach Slack. ({exc.__class__.__name__})",
+            )
+
+        auth = r.json()
+        if not auth.get("ok"):
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                f"Slack rejected that token ({auth.get('error')}). The token is a "
+                "bot token (xoxb-…) from api.slack.com/apps → your app → OAuth & "
+                "Permissions — reinstall the app if it was rotated.",
+            )
+
+        team_domain = auth.get("url", "").replace("https://", "").rstrip("/").split(".")[0]
+        if not team_domain:
+            team_domain = auth.get("team", "slack")
+
+        channel = await _slack_find_channel(c, body.channel)
+
+        # Public channels the app is not in still show in the list; history
+        # would fail on them, so say so before anything is stored.
+        info = await c.get(
+            "https://slack.com/api/conversations.info",
+            params={"channel": channel["id"]},
+        )
+        info_payload = info.json()
+        if info_payload.get("ok") and not (info_payload.get("channel") or {}).get("is_member"):
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                f"The bot can see #{body.channel} but is not in it. Open the "
+                "channel → Details → Add apps → add this app, then re-save.",
+            )
+        if not info_payload.get("ok") and info_payload.get("error") == "not_in_channel":
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                f"The bot is not in #{body.channel}. Open the channel → Details → "
+                "Add apps → add this app, then re-save.",
+            )
+
+        return {"team_domain": team_domain, "channel_id": channel["id"],
+                "channel_name": channel.get("name", body.channel)}
+
+
+async def _slack_find_channel(client, name: str) -> dict:
+    """Resolve a channel name to its Slack object, listing what is visible on a miss."""
+    cursor = None
+    while True:
+        params = {**({"cursor": cursor} if cursor else {}),
+                  "types": "public_channel,private_channel",
+                  "exclude_archived": True, "limit": 200}
+        r = await client.get("https://slack.com/api/conversations.list", params=params)
+        payload = r.json()
+        if not payload.get("ok"):
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                f"Slack couldn't list channels: {payload.get('error')}",
+            )
+        for ch in payload.get("channels", []):
+            if ch.get("name") == name:
+                return ch
+        cursor = (payload.get("response_metadata") or {}).get("next_cursor")
+        if not cursor:
+            break
+
+    # Collect the names we did find so the owner can see what is actually there.
+    visible = set()
+    cursor = None
+    while True:
+        params = {**({"cursor": cursor} if cursor else {}),
+                  "types": "public_channel,private_channel",
+                  "exclude_archived": True, "limit": 200}
+        r = await client.get("https://slack.com/api/conversations.list", params=params)
+        payload = r.json()
+        if payload.get("ok"):
+            visible.update(ch.get("name", "") for ch in payload.get("channels", []))
+        cursor = (payload.get("response_metadata") or {}).get("next_cursor")
+        if not cursor:
+            break
+
+    raise HTTPException(
+        status.HTTP_422_UNPROCESSABLE_ENTITY,
+        f"No channel '#{name}' is visible to this bot. Channels it can see: "
+        f"{', '.join(sorted(visible)) or 'none'}",
+    )
+
+
 def _source_doc(workspace_id: str, source_type: str, label: str, config: dict, config_secret: dict | None = None) -> dict:
     now = datetime.now(timezone.utc)
     doc = {
@@ -208,7 +358,7 @@ async def add_source(
     # surfaces the first one's complaint ("Input should be 'github'"), which
     # tells the user nothing about what they actually got wrong.
     body: Annotated[
-        Union[GithubSourceIn, UrlSourceIn, ConfluenceSourceIn, JiraSourceIn],
+        Union[GithubSourceIn, UrlSourceIn, ConfluenceSourceIn, JiraSourceIn, SlackSourceIn],
         Field(discriminator="type"),
     ],
     user=Depends(get_current_user),
@@ -253,11 +403,22 @@ async def add_source(
 
     elif body.type == "jira":
         await _verify_jira(body)
-        key = body.project_key.strip().upper()
-        label = body.label or f"Jira: {key}"
-        config = {"base_url": body.base_url, "project_key": key, "email": body.email}
+        project_key = body.project_key.strip().upper()
+        label = body.label or f"Jira: {project_key}"
+        config = {"base_url": body.base_url, "project_key": project_key, "email": body.email}
         config_secret = {"api_token": body.api_token}
         doc = _source_doc(ws["_id"], "jira", label, config, config_secret)
+
+    elif body.type == "slack":
+        info = await _verify_slack(body)
+        label = body.label or f"Slack: #{info['channel_name']}"
+        config = {
+            "channel_id": info["channel_id"],
+            "channel_name": info["channel_name"],
+            "team_domain": info["team_domain"],
+        }
+        config_secret = {"token": body.token}
+        doc = _source_doc(ws["_id"], "slack", label, config, config_secret)
 
     await db.sources.insert_one(doc)
     return {"source": serialize_source(doc)}
