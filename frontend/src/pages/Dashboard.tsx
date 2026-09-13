@@ -30,7 +30,7 @@ const NUDGE_KEY = 'sensei-hide-password-nudge'
 const overviewCards = [
   {
     title: 'Sources',
-    description: 'GitHub, Confluence, Jira, files and links the agent may read',
+    description: 'GitHub, Confluence, files and links the agent may read',
     to: '/sources',
     icon: Database,
     ownerOnly: false,

@@ -8,6 +8,18 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { useGetTrustQuery, useDeleteSourceMutation, type Grant } from '@/services/onboardingApi'
 
+function RevokeButton({ id }: { id: string }) {
+  const [deleteSource, { isLoading }] = useDeleteSourceMutation()
+  return (
+    <Button
+      size="sm" variant="ghost" className="h-7 shrink-0 text-xs text-muted-foreground hover:text-destructive"
+      disabled={isLoading} onClick={() => deleteSource(id)}
+    >
+      {isLoading ? 'Revoking…' : 'Revoke'}
+    </Button>
+  )
+}
+
 function GrantCard({ grant, canManage }: { grant: Grant; canManage: boolean }) {
   const [deleteSource, { isLoading }] = useDeleteSourceMutation()
   const encrypted = grant.credential_state === 'encrypted'
@@ -33,7 +45,7 @@ function GrantCard({ grant, canManage }: { grant: Grant; canManage: boolean }) {
           )}
         </div>
         <CardTitle className="text-base">{grant.label}</CardTitle>
-        {grant.credential && (
+        {grant.credential && grant.credential !== 'None' && (
           <CardDescription className="flex items-center gap-1.5">
             <KeyRound className="h-3.5 w-3.5" /> {grant.credential}
           </CardDescription>
@@ -110,6 +122,10 @@ export default function Trust() {
   }
 
   const { coverage } = data
+  // "Does this hold a credential" is the line that matters here, not the
+  // connector's name.
+  const credentialed = data.grants.filter((g) => g.credential && g.credential !== 'None')
+  const plain = data.grants.filter((g) => !g.credential || g.credential === 'None')
 
   return (
     <AppShell title="Trust">
@@ -163,22 +179,59 @@ export default function Trust() {
           </CardContent>
         </Card>
 
-        <div className="flex flex-col gap-3">
-          <p className="text-sm font-medium">Access granted ({data.grants.length})</p>
-          {data.grants.length === 0 ? (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Nothing connected</CardTitle>
-                <CardDescription>
-                  The agent can't reach anything yet.{' '}
-                  <Link to="/sources" className="underline underline-offset-2">Connect a source</Link>.
-                </CardDescription>
-              </CardHeader>
-            </Card>
-          ) : (
-            data.grants.map((g) => <GrantCard key={g.id} grant={g} canManage={data.can_manage} />)
-          )}
-        </div>
+        {credentialed.length > 0 && (
+          <div className="flex flex-col gap-3">
+            <div>
+              <p className="text-sm font-medium">Credentialed access ({credentialed.length})</p>
+              <p className="text-xs text-muted-foreground">
+                These hold a token. They are the ones worth reading closely.
+              </p>
+            </div>
+            {credentialed.map((g) => <GrantCard key={g.id} grant={g} canManage={data.can_manage} />)}
+          </div>
+        )}
+
+        {/* Files and links carry no credential and no ceiling worth stating.
+            Giving each one a full card buried the two that do. */}
+        {plain.length > 0 && (
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">
+                Uploads and links ({plain.length})
+              </CardTitle>
+              <CardDescription>
+                No credential, and no reach beyond themselves — a file is only
+                what was uploaded, and a link is only a public page.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-1.5">
+              {plain.map((g) => (
+                <div key={g.id} className="flex items-center gap-3 rounded-md border px-3 py-2">
+                  <Badge variant="secondary" className="text-xs capitalize shrink-0">{g.type}</Badge>
+                  <span className="min-w-0 flex-1 truncate text-sm">{g.label}</span>
+                  <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
+                    {g.chunks} chunks
+                  </span>
+                  {data.can_manage && (
+                    <RevokeButton id={g.id} />
+                  )}
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        )}
+
+        {data.grants.length === 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Nothing connected</CardTitle>
+              <CardDescription>
+                The agent can't reach anything yet.{' '}
+                <Link to="/sources" className="underline underline-offset-2">Connect a source</Link>.
+              </CardDescription>
+            </CardHeader>
+          </Card>
+        )}
 
         <Card>
           <CardHeader className="pb-3">
