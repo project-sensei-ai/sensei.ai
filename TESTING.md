@@ -82,19 +82,20 @@ tools here are read-only, so "create an issue" shows the refusal path without
 touching anything. **Gaps** shows what this project failed to document, with
 three drafts on offer. **Answers** has a worked ledger example.
 
-## 4. The Google Meet bot
+## 4. The Google Meet bot — experimental
 
-On **Meetings**, choose *Join a Google Meet*, paste a meet link, and send it.
-A headless browser joins as "Sensei (AI colleague)"; admit it. It turns on
-captions, reads them, and posts answers and corrections into the meeting
-chat, with the source named. Each step it takes is reported on the page
-(`bot: waiting to be admitted`, `bot: listening`), because Google changes
-Meet's markup without notice and a silent failure would be worse than a
-visible one.
+On **Meetings**, *Join a Google Meet* sends a headless browser into the call
+as "Sensei (AI colleague)". It reports every step on the page (`waiting for
+the host`, `waiting to be admitted`, `listening`) because Google changes Meet
+without notice and a silent failure would be worse than a visible one.
 
-This needs a server that can run Chromium (the container image includes it)
-and a Meet that allows guests. If your organisation's Meet requires a signed-in
-Google account, the bot reports that and stops.
+What we found testing it: Meet drops a guest's join request when the host is
+not yet in the call, throttles repeated anonymous attempts from one address,
+and shows a sign-in wall for meetings that do not allow guests. The bot now
+waits for the host and knocks again, but a Google Workspace meeting with
+**Open access** (no knocking) is the reliable configuration. For the demo,
+companion mode beside the call is the dependable path — it uses the same
+judgement and speaks aloud on the device running it.
 
 ## 5. What is not built
 
@@ -131,14 +132,26 @@ which are offered, and when the agent speaks in a meeting.
 writes the Apollo pages into a Confluence space; `python scripts/seed_apollo.py`
 creates Maya's project, sources, tool grant and team through the API.
 
-## 7. Connecting your own
+## 7. Onboarding a project of your own
+
+Register as an owner and Sensei opens a conversation: it asks the project's
+name, where the team keeps its knowledge, which accounts it should get, and
+who may ask it things. Each answer is a connection, not a form field.
+
+On the accounts step, **Sign in with Atlassian** opens Atlassian's own consent
+page in a window; approve it and the connection lists its tools (Jira and
+Confluence, read and write, classified) with the token stored encrypted.
+Nothing is pasted. Notion, Linear, Sentry, Asana and Intercom work the same
+way; any other MCP server with sign-in can be given by URL.
+
+## 8. Connecting your own
 
 As an owner:
 
 - **Sources** — GitHub (a PAT), Confluence or Jira (an Atlassian API token;
   the same token serves both), files, URLs.
-- **Tools** — any MCP server. Presets for GitHub, Zapier and Sentry fill the
-  URL; paste your token as the Authorization header. It connects once to list
+- **Tools** — sign in (Atlassian, Notion, Linear, Sentry, Asana, Intercom) or
+  paste a token (GitHub, Zapier, any MCP server). It connects once to list
   the tools before anything is stored, so a wrong URL fails in the form.
 - **Team** — Dashboard → add an email. The invite link is shown so a reviewer
   can use it without an inbox.

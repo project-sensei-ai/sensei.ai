@@ -227,7 +227,7 @@ export interface ToolSpec {
   access: 'read' | 'write'
 }
 
-export type GrantKind = 'mcp_http' | 'mcp_sse' | 'mcp_stdio'
+export type GrantKind = 'mcp_http' | 'mcp_sse' | 'mcp_stdio' | 'mcp_oauth'
 
 export interface ToolGrant {
   id: string
@@ -242,8 +242,10 @@ export interface ToolGrant {
   tools: ToolSpec[]
   read_count: number
   write_count: number
-  status: 'connected' | 'error' | 'disabled'
+  status: 'connected' | 'error' | 'disabled' | 'authorizing'
   error_message: string | null
+  auth?: 'oauth' | 'token'
+  needs_reauth?: boolean
   created_at: string | null
   last_used_at: string | null
   uses: number
@@ -549,6 +551,15 @@ const onboardingApi = api.injectEndpoints({
       invalidatesTags: ['Tool', 'Trust'],
     }),
 
+    getOAuthPresets: builder.query<{ presets: { id: string; name: string; url: string; blurb: string }[] }, void>({
+      query: () => '/tools/oauth/presets',
+    }),
+
+    startOAuth: builder.mutation<{ grant_id: string; auth_url: string }, { name: string; url: string; allow_write?: boolean }>({
+      query: (body) => ({ url: '/tools/oauth/start', method: 'POST', body }),
+      invalidatesTags: ['Tool'],
+    }),
+
     getArtifacts: builder.query<{ artifacts: Artifact[] }, void>({
       query: () => '/artifacts',
       providesTags: ['Artifact'],
@@ -651,6 +662,8 @@ export const {
   useUpdateToolMutation,
   useTestToolMutation,
   useRevokeToolMutation,
+  useGetOAuthPresetsQuery,
+  useStartOAuthMutation,
   useGetArtifactsQuery,
   useListMeetingsQuery,
   useGetMeetingQuery,

@@ -124,8 +124,12 @@ A source is something the agent reads. A tool grant is something it can
 one an organisation runs internally — connected with a credential the owner
 pastes as the Authorization header.
 
-**What we ask for:** a name, the server URL (or a local command for stdio
-servers), and optionally an Authorization value.
+**What we ask for:** for servers that support MCP's OAuth profile (Atlassian,
+Notion, Linear, Sentry, Asana, Intercom…), nothing but a click: Sensei
+registers itself with the server dynamically, the owner logs in on the
+vendor's own page, and the token that comes back is stored encrypted and
+refreshed automatically. For the rest, a name, the server URL (or a local
+command for stdio servers), and an Authorization value.
 
 **Ceiling.** Whatever the token's account can do on that service. A GitHub
 PAT with `repo` can open, comment on and close issues and PRs across every

@@ -146,7 +146,7 @@ async def hear(meeting_id: str, body: UtteranceIn, request: Request,
             break
         except Exception as exc:
             if attempt == 0 and is_quota_error(exc):
-                mark_exhausted(model_named_in(exc) or pick_groq_model(background=True))
+                mark_exhausted(pick_groq_model(background=True))
                 continue
             reply = listener.Reply(kind="silent", reason=f"could not judge it: {humanise(exc)}", trigger=utterance["text"])
     if reply is None:

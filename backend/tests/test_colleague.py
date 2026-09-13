@@ -98,3 +98,27 @@ def test_select_relevant_keeps_the_tools_the_question_names():
 def test_select_relevant_is_a_no_op_under_the_limit():
     tools = [_tool("a"), _tool("b")]
     assert select_relevant(tools, "anything", limit=5) is tools
+
+
+# ── Which model answers ───────────────────────────────────────────────────────
+
+def test_model_chain_adds_providers_only_when_their_key_is_set(monkeypatch):
+    from agent import agent as a
+    monkeypatch.setattr(a.settings, "GROQ_API_KEY", "g")
+    monkeypatch.setattr(a.settings, "CEREBRAS_API_KEY", "")
+    monkeypatch.setattr(a.settings, "GEMINI_API_KEY", "gm")
+    chain = a.model_chain(background=False)
+    providers = [c[1] for c in chain]
+    assert providers[0] == "groq" and "gemini" in providers and "cerebras" not in providers
+
+
+def test_pick_model_routes_around_an_exhausted_model(monkeypatch):
+    from agent import agent as a
+    monkeypatch.setattr(a.settings, "GROQ_API_KEY", "g")
+    monkeypatch.setattr(a.settings, "GROQ_FALLBACK_MODELS", "second,third")
+    monkeypatch.setattr(a.settings, "GROQ_MODEL", "first")
+    a._EXHAUSTED.clear()
+    assert a.pick_model(False)[3] == "first"
+    a.mark_exhausted("groq/first")
+    assert a.pick_model(False)[3] == "second"
+    a._EXHAUSTED.clear()

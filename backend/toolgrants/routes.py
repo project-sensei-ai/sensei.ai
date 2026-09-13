@@ -5,6 +5,7 @@ from typing import Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field, field_validator
 
 from auth.deps import get_current_user
@@ -12,7 +13,7 @@ from core import secrets
 from core.errors import humanise
 from db.database import get_db
 from db.membership import OWNER_ROLES, require_owner, require_workspace
-from toolgrants import pool, registry
+from toolgrants import oauth, pool, registry
 
 router = APIRouter(tags=["tools"])
 
@@ -115,6 +116,68 @@ async def connect_tool(body: GrantIn, user=Depends(get_current_user), db=Depends
     return {"grant": registry.serialize_grant(doc, for_owner=True)}
 
 
+class OAuthStartIn(BaseModel):
+    name: str = Field(..., min_length=1, max_length=60)
+    url: str = Field(..., min_length=8)
+    allow_write: bool = False
+
+
+@router.get("/oauth/presets")
+async def oauth_presets():
+    return {"presets": oauth.OAUTH_PRESETS}
+
+
+@router.post("/oauth/start", status_code=status.HTTP_202_ACCEPTED)
+async def oauth_start(body: OAuthStartIn, user=Depends(get_current_user), db=Depends(get_db)):
+    """
+    Begin a login-based connection. Returns the vendor's login URL for the
+    UI to open; the grant finishes in the background once the person is back.
+    """
+    ws = await require_owner(user, db, "connect tools")
+    url = body.url.strip()
+    if not url.startswith("https://"):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "OAuth servers must be https://")
+    now = datetime.now(timezone.utc)
+    doc = {
+        "_id": uuid4().hex, "workspace_id": ws["_id"], "name": body.name.strip(),
+        "kind": "mcp_oauth", "url": url, "headers": {}, "command": None, "args": [],
+        "allow_write": body.allow_write, "disabled_tools": [], "tools": [],
+        "status": "authorizing", "error_message": None, "oauth": {},
+        "created_at": now, "created_by": user["id"], "uses": 0,
+    }
+    await db.tool_grants.insert_one(doc)
+    oauth.start_connect(doc)
+    auth_url = await asyncio.to_thread(oauth.wait_for_auth_url, doc["_id"], 40.0)
+    if not auth_url:
+        fresh = await db.tool_grants.find_one({"_id": doc["_id"]})
+        detail = (fresh or {}).get("error_message") or "The server did not offer a login within 40 seconds. Check the URL."
+        await db.tool_grants.delete_one({"_id": doc["_id"]})
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail)
+    await pool.drop(ws["_id"])
+    return {"grant_id": doc["_id"], "auth_url": auth_url}
+
+
+@router.get("/oauth/callback/{grant_id}", response_class=HTMLResponse)
+async def oauth_callback(grant_id: str, code: str | None = None, state: str | None = None,
+                         error: str | None = None, error_description: str | None = None,
+                         db=Depends(get_db)):
+    """Where the vendor sends the person back. Public by necessity; the code is
+    single-use and only the worker waiting on this grant can spend it."""
+    if error or not code:
+        msg = error_description or error or "no code returned"
+        await db.tool_grants.update_one({"_id": grant_id}, {"$set": {"status": "error", "error_message": f"Login refused: {msg}"}})
+        body = f"<h2>Login did not complete</h2><p>{msg}</p><p>You can close this window.</p>"
+    else:
+        delivered = oauth.deliver_code(grant_id, code, state)
+        body = ("<h2>Connected</h2><p>Sensei is finishing the connection. You can close this window.</p>"
+                if delivered else "<h2>This login has expired</h2><p>Start the connection again from the Tools page.</p>")
+    return f"""<!doctype html><html><body style="font-family:system-ui;padding:40px;color:#222">
+{body}<script>
+try {{ if (window.opener) {{ window.opener.postMessage({{type: 'sensei-oauth', grant_id: '{grant_id}'}}, '*'); }} }} catch (e) {{}}
+setTimeout(() => {{ try {{ window.close(); }} catch (e) {{}} }}, 1500);
+</script></body></html>"""
+
+
 @router.get("")
 async def list_tools(user=Depends(get_current_user), db=Depends(get_db)):
     ws, role = await require_workspace(user, db)
@@ -153,6 +216,7 @@ async def test_tool(grant_id: str, user=Depends(get_current_user), db=Depends(ge
         secret["env"] = {k: secrets.decrypt(v) for k, v in secret["env"].items()}
     try:
         tools = await _probe_or_422(doc, secret)
+        await pool.drop(ws["_id"])
         await db.tool_grants.update_one(
             {"_id": grant_id},
             {"$set": {"tools": tools, "status": "connected", "error_message": None,

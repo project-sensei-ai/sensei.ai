@@ -12,7 +12,9 @@ import {
   useGetMyBriefQuery,
   useGetMyWorkspaceQuery,
   useGetLedgerQuery,
+  useGetTrustQuery,
 } from '@/services/onboardingApi'
+import { SenseiAvatar } from '@/components/SenseiAvatar'
 import {
   errorMessage,
   useGetMeQuery,
@@ -151,25 +153,42 @@ export default function Dashboard() {
   const [checkResult, setCheckResult] = useState<string | null>(null)
   const digests = (digestData?.digests ?? []).filter((d) => !d.acknowledged)
   const { data: ledger } = useGetLedgerQuery()
+  const { data: trust } = useGetTrustQuery()
   const user = data?.user
   const workspace = wsData?.workspace
   const isOwner = workspace?.role !== 'member'
+  const reach = trust?.coverage
 
   return (
     <AppShell>
       {user && user.has_password === false && <SetPasswordBanner />}
 
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">
-          Welcome back{user ? `, ${user.name.split(' ')[0]}` : ''}
-        </h1>
-        <p className="text-muted-foreground">
-          {workspace
-            ? isOwner
-              ? `You own ${workspace.name}. The agent reads only what you connect.`
-              : `You're on ${workspace.name}. Ask the agent anything about it.`
-            : "Here's your project context at a glance."}
-        </p>
+      {/* The colleague, on duty. What it can reach is stated up front — the
+          same numbers the Trust page carries, because they are the promise. */}
+      <div className="flex flex-col gap-4 rounded-2xl border bg-gradient-to-br from-primary/[0.06] via-transparent to-transparent p-5 sm:flex-row sm:items-center sm:gap-6">
+        <SenseiAvatar size="lg" pulse />
+        <div className="min-w-0 flex-1">
+          <h1 className="text-xl font-semibold tracking-tight">
+            Sensei is on duty{workspace ? ` for ${workspace.name}` : ''}
+          </h1>
+          <p className="mt-0.5 text-sm text-muted-foreground">
+            {user ? `Hi ${user.name.split(' ')[0]}. ` : ''}
+            {isOwner
+              ? 'It reads what you connected, uses the accounts you granted, and speaks only when it can cite something.'
+              : 'Ask it anything about the project, hand it work, or bring it into a meeting.'}
+          </p>
+          {reach && (
+            <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted-foreground">
+              <span><span className="font-semibold text-foreground tabular-nums">{reach.sources}</span> sources · <span className="font-semibold text-foreground tabular-nums">{reach.indexed_chunks}</span> passages</span>
+              <span><span className="font-semibold text-foreground tabular-nums">{reach.tools ?? 0}</span> tools{reach.write_enabled ? `, writes allowed on ${reach.write_enabled}` : ', read-only'}</span>
+              <span><span className="font-semibold text-foreground tabular-nums">{reach.people_with_access}</span> people can ask</span>
+            </div>
+          )}
+        </div>
+        <div className="flex shrink-0 gap-2">
+          <Button asChild size="sm"><Link to="/chat">Ask something</Link></Button>
+          <Button asChild size="sm" variant="outline"><Link to="/meetings">Join a meeting</Link></Button>
+        </div>
       </div>
 
       {/* The agent's unprompted work, surfaced first — it happened before this

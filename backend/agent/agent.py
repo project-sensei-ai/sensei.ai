@@ -35,18 +35,64 @@ async def retry_on_quota(fn, *args, **kwargs):
     except Exception as exc:
         if not is_quota_error(exc):
             raise
-        mark_exhausted(model_named_in(exc) or pick_groq_model(background=True))
+        mark_exhausted(pick_groq_model(background=True))
         return await fn(*args, **kwargs)
 
 
+GROQ_BASE = "https://api.groq.com/openai/v1"
+
+# Free, hosted, OpenAI-compatible. Each becomes part of the chain when its key
+# is present, so an exhausted Groq day falls through to Cerebras, then Gemini,
+# then OpenRouter, without anyone editing a flag.
+_PROVIDERS = [
+    ("groq", GROQ_BASE, "GROQ_API_KEY", "GROQ_MODEL", "GROQ_BACKGROUND_MODEL"),
+    ("cerebras", "https://api.cerebras.ai/v1", "CEREBRAS_API_KEY", "CEREBRAS_MODEL", "CEREBRAS_BACKGROUND_MODEL"),
+    ("gemini", "https://generativelanguage.googleapis.com/v1beta/openai/", "GEMINI_API_KEY", "GEMINI_MODEL", "GEMINI_BACKGROUND_MODEL"),
+    ("openrouter", "https://openrouter.ai/api/v1", "OPENROUTER_API_KEY", "OPENROUTER_MODEL", "OPENROUTER_BACKGROUND_MODEL"),
+]
+
+
+def model_chain(background: bool) -> list[tuple[str, str, str, str]]:
+    """(key, provider, base_url, model_id) in the order they should be tried."""
+    chain = []
+    for name, base, key_env, model_env, bg_env in _PROVIDERS:
+        api_key = getattr(settings, key_env, "")
+        if not api_key:
+            continue
+        preferred = getattr(settings, bg_env if background else model_env)
+        models = [preferred]
+        if name == "groq":
+            models += [m.strip() for m in settings.GROQ_FALLBACK_MODELS.split(",") if m.strip()]
+        for m in models:
+            if m not in [c[3] for c in chain if c[1] == name]:
+                chain.append((f"{name}/{m}", name, base, m))
+    return chain
+
+
+def pick_model(background: bool) -> tuple[str, str, str, str]:
+    """The first (key, provider, base_url, model) in the chain with quota left."""
+    chain = model_chain(background)
+    if not chain:
+        return ("groq/" + settings.GROQ_MODEL, "groq", GROQ_BASE, settings.GROQ_MODEL)
+    for entry in chain:
+        if _usable(entry[0]):
+            return entry
+    return chain[0]
+
+
 def pick_groq_model(background: bool) -> str:
-    """The configured model, or the first fallback with quota left."""
-    preferred = settings.GROQ_BACKGROUND_MODEL if background else settings.GROQ_MODEL
-    chain = [preferred] + [m.strip() for m in settings.GROQ_FALLBACK_MODELS.split(",") if m.strip()]
-    for m in chain:
-        if _usable(m):
-            return m
-    return preferred
+    """Kept for callers that only need the id; the chain may not be Groq at all."""
+    return pick_model(background)[0]
+
+
+def providers_status() -> list[dict]:
+    """What the fallback chain looks like right now — shown on the Trust page."""
+    out = []
+    for key, provider, _base, model in model_chain(False) + model_chain(True):
+        if any(o["key"] == key for o in out):
+            continue
+        out.append({"key": key, "provider": provider, "model": model, "usable": _usable(key)})
+    return out
 from .tools import make_inventory_tool, make_search_tool, search_knowledge_base
 
 SENSEI_SYSTEM_PROMPT = """You are Sensei, a colleague on this project — not a chatbot. You were onboarded
@@ -134,17 +180,22 @@ def _build_model(background: bool = False):
             client_args={"api_key": "ollama", "base_url": settings.OLLAMA_BASE_URL},
         )
     from strands.models.openai import OpenAIModel
-    return OpenAIModel(
-        model_id=pick_groq_model(background),
-        client_args={
-            "api_key": settings.GROQ_API_KEY,
-            "base_url": "https://api.groq.com/openai/v1",
-        },
+    key, provider, base_url, model_id = pick_model(background)
+    api_key = {
+        "groq": settings.GROQ_API_KEY, "cerebras": settings.CEREBRAS_API_KEY,
+        "gemini": settings.GEMINI_API_KEY, "openrouter": settings.OPENROUTER_API_KEY,
+    }.get(provider, settings.GROQ_API_KEY)
+    model = OpenAIModel(
+        model_id=model_id,
+        client_args={"api_key": api_key, "base_url": base_url},
         # A structured report of eight gaps is a lot of tokens in one response,
         # and running out mid-object fails the whole run with
         # "unrecoverable state due to max_tokens limit".
         params={"max_tokens": settings.MAX_OUTPUT_TOKENS},
     )
+    # So a quota error can be pinned on the exact provider/model that raised it.
+    model.sensei_key = key
+    return model
 
 
 _RETRY = ModelRetryStrategy(max_attempts=3, initial_delay=2, max_delay=8)

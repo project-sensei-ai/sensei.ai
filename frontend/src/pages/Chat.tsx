@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { Bot, ChevronDown, ChevronUp, Download, FileSpreadsheet, FileText, MessageSquarePlus, Send, Trash2, User } from 'lucide-react'
+import { ChevronDown, ChevronUp, Download, FileSpreadsheet, FileText, MessageSquarePlus, Send, Trash2, User } from 'lucide-react'
 import { AppShell } from '@/components/AppShell'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/Spinner'
+import { SenseiAvatar } from '@/components/SenseiAvatar'
 import {
   useListChatSessionsQuery,
   useCreateChatSessionMutation,
@@ -61,10 +62,10 @@ function MessageBubble({ msg }: { msg: ChatMessage & { error?: boolean } }) {
     <div className={`flex gap-3 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
       <div
         className={`shrink-0 flex h-8 w-8 items-center justify-center rounded-full text-sm ${
-          isUser ? 'bg-primary text-primary-foreground' : 'bg-muted'
+          isUser ? 'bg-primary text-primary-foreground' : ''
         }`}
       >
-        {isUser ? <User className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
+        {isUser ? <User className="h-4 w-4" /> : <SenseiAvatar size="sm" />}
       </div>
       <div
         className={`max-w-[80%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
@@ -111,11 +112,37 @@ function ArtifactList({ artifacts }: { artifacts: Artifact[] }) {
   )
 }
 
+// What a colleague gets asked on day one. Each is a real capability, and the
+// chip is the fastest way for a reviewer to find out.
+const STARTERS = [
+  "Who's on call next week, and who's the release captain?",
+  'What has Daniel worked on recently?',
+  'Put the open issues and PRs in a spreadsheet',
+  'What did we decide about Friday deploys?',
+  'Is there a runbook for rollbacks?',
+]
+
+function Starters({ onPick }: { onPick: (q: string) => void }) {
+  return (
+    <div className="flex flex-wrap justify-center gap-2">
+      {STARTERS.map((q) => (
+        <button
+          key={q}
+          onClick={() => onPick(q)}
+          className="rounded-full border bg-background px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground"
+        >
+          {q}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 function TypingIndicator() {
   return (
     <div className="flex gap-3">
-      <div className="shrink-0 flex h-8 w-8 items-center justify-center rounded-full bg-muted">
-        <Bot className="h-4 w-4" />
+      <div className="shrink-0 flex h-8 w-8 items-center justify-center rounded-full">
+        <SenseiAvatar size="sm" pulse />
       </div>
       <div className="flex items-center gap-1.5 rounded-2xl rounded-tl-sm bg-muted px-4 py-3">
         <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground animate-bounce [animation-delay:-0.3s]" />
@@ -350,13 +377,14 @@ export default function Chat() {
         <div className="flex-1 flex flex-col min-w-0 px-6">
           {!activeSessionId ? (
             <div className="flex-1 flex flex-col items-center justify-center gap-4 text-center">
-              <Bot className="h-12 w-12 text-muted-foreground/40" />
+              <SenseiAvatar size="lg" />
               <div>
-                <p className="font-medium">Start a conversation</p>
+                <p className="font-medium">Ask Sensei like a colleague</p>
                 <p className="text-sm text-muted-foreground mt-1">
-                  Ask about the project, a person's work, a ticket's status — or ask for a spreadsheet.
+                  About the project, a person's work, a ticket's status — or hand it work.
                 </p>
               </div>
+              <Starters onPick={(q) => { setInput(q); handleNewChat() }} />
               <Button onClick={handleNewChat} disabled={creating} className="gap-2">
                 {creating ? <Spinner className="h-4 w-4" /> : <MessageSquarePlus className="h-4 w-4" />}
                 New chat
@@ -367,8 +395,10 @@ export default function Chat() {
               {/* Message list */}
               <div className="flex-1 overflow-y-auto flex flex-col gap-4 py-4">
                 {messages.length === 0 && !streaming && (
-                  <div className="flex items-center justify-center h-full">
-                    <p className="text-sm text-muted-foreground">Send a message to get started.</p>
+                  <div className="flex h-full flex-col items-center justify-center gap-4">
+                    <SenseiAvatar size="lg" />
+                    <p className="text-sm text-muted-foreground">What would you ask a colleague who has read everything?</p>
+                    <Starters onPick={(q) => { setInput(q); inputRef.current?.focus() }} />
                   </div>
                 )}
                 {messages.map((msg, i) => (

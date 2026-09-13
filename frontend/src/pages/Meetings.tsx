@@ -355,31 +355,38 @@ export default function Meetings() {
   const [mode, setMode] = useState<'companion' | 'meet_bot'>('companion')
   const [meetUrl, setMeetUrl] = useState('')
   const [err, setErr] = useState('')
-  const [active, setActive] = useState<Meeting | null>(null)
+  const [activeId, setActiveId] = useState<string | null>(null)
+  // Ended here, so a stale list refetch cannot pull it back on screen as live.
+  const [endedIds, setEndedIds] = useState<Set<string>>(new Set())
 
   const meetings = data?.meetings ?? []
-  const liveOnServer = meetings.find((m) => m.status === 'live')
+  const liveOnServer = meetings.find((m) => m.status === 'live' && !endedIds.has(m.id))
+  const active = activeId ? meetings.find((m) => m.id === activeId) ?? null : null
 
   useEffect(() => {
-    if (!active && liveOnServer) setActive(liveOnServer)
-  }, [liveOnServer, active])
+    if (!activeId && liveOnServer) setActiveId(liveOnServer.id)
+  }, [liveOnServer, activeId])
 
   async function start(e: FormEvent) {
     e.preventDefault()
     setErr('')
     try {
       const res = await startMeeting({ title: title || 'Team sync', mode, meet_url: mode === 'meet_bot' ? meetUrl : undefined }).unwrap()
-      setActive(res.meeting)
+      setActiveId(res.meeting.id)
       setTitle('')
     } catch (e: any) {
       setErr(e?.data?.detail || 'Could not start the meeting')
     }
   }
 
-  if (active && active.status === 'live') {
+  if (active && active.status === 'live' && !endedIds.has(active.id)) {
     return (
       <AppShell title="Meetings">
-        <LiveMeeting meeting={active} onEnded={() => { setActive(null); refetch() }} />
+        <LiveMeeting
+          key={active.id}
+          meeting={active}
+          onEnded={() => { setEndedIds((s) => new Set(s).add(active.id)); setActiveId(null); refetch() }}
+        />
       </AppShell>
     )
   }

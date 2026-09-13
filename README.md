@@ -36,7 +36,7 @@ Agents for Humans hackathon, Professional Agents track.
 - **Who did what** — "what has Priya changed recently" reads her commits, PRs and tickets, not prose that mentions her.
 - **Jira, live** — ticket status is read from Jira at the moment of asking, never from the index. A Confluence credential is a Jira credential too.
 - **Work, handed back as a file** — "put the open issues in a spreadsheet" produces an `.xlsx`; "write me a handover note" produces a `.docx`, attached to the reply.
-- **Tools the owner granted** — any MCP server (GitHub, Zapier for Gmail/Sheets/Slack, Sentry, an internal API) connected with the owner's credential. Its tools appear in the agent loop with the service's name as a prefix. Writes are refused, inside the loop, unless the owner switched them on for that connection — and the agent says exactly that instead of pretending.
+- **Tools the owner granted** — any MCP server, connected two ways: **sign in** (Atlassian, Notion, Linear, Sentry, Asana, Intercom — MCP's OAuth profile with dynamic client registration, so the owner logs in on the vendor's page and Sensei receives a token it refreshes itself), or a pasted token (GitHub, Zapier for Gmail/Sheets/Slack, an internal API). Its tools appear in the agent loop with the service's name as a prefix. Writes are refused, inside the loop, unless the owner switched them on for that connection — and the agent says exactly that instead of pretending.
 
 ### In the room
 
@@ -50,6 +50,14 @@ indexes them, so next week's "what did we decide" is answerable with a citation
 to the meeting.
 
 ---
+
+### Onboarding is a conversation
+
+A new colleague's first day is a conversation, not a form. Sensei asks what the
+project is called, where the team keeps its knowledge, which accounts it gets,
+and who may ask it things; the owner answers by connecting. The last message
+is Sensei stating exactly what it can now reach — the same numbers the Trust
+page carries.
 
 ## Trust
 
@@ -99,6 +107,10 @@ DEBUG=true                  # drops the Secure cookie flag so login works over H
 
 > Losing `SECRET_ENCRYPTION_KEY` makes existing sources and tool grants
 > unreadable — they have to be reconnected.
+
+**Free hosted fallbacks:** set any of `CEREBRAS_API_KEY` (cloud.cerebras.ai,
+1M tokens/day), `GEMINI_API_KEY` (aistudio.google.com) or `OPENROUTER_API_KEY`
+and they join the chain behind Groq. No card, no local model.
 
 **Bedrock instead of Groq:** `LLM_BACKEND=bedrock` with an IAM principal
 (not the account root — Bedrock refuses root) that has `bedrock:InvokeModel`,
@@ -152,8 +164,11 @@ posts only when it can cite a source. In a meeting, a correction needs a typed
 from documentation with transcripts excluded.
 
 **Model backends.** One flag: `LLM_BACKEND=bedrock | groq | ollama`.
-Background agents run a smaller model than interactive chat. On Groq, a
-fallback chain routes around a model whose daily quota is exhausted.
+Background agents run a smaller model than interactive chat. On the hosted
+free tiers, a chain routes around any model whose quota is exhausted: Groq's
+models first, then Cerebras, Gemini and OpenRouter — each joins the chain when
+its key is present. A quota error marks that model out for an hour and the
+turn retries on the next.
 
 ---
 

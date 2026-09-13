@@ -27,7 +27,7 @@ from typing import Any
 from core import secrets
 from db.models import _iso
 
-KINDS = ("mcp_http", "mcp_sse", "mcp_stdio")
+KINDS = ("mcp_http", "mcp_sse", "mcp_stdio", "mcp_oauth")
 
 # Names that almost always change state. MCP annotations win when a server
 # provides them; this is the fallback for the many that do not.
@@ -73,6 +73,11 @@ def _headers(grant: dict, secret: dict) -> dict:
 def make_transport(grant: dict, secret: dict):
     """A zero-arg callable that opens the MCP transport — what MCPClient wants."""
     kind = grant.get("kind")
+    if kind == "mcp_oauth":
+        # The credential is a token the person earned by logging in, refreshed
+        # by the provider itself. No header to build.
+        from toolgrants.oauth import make_provider, transport_with_auth
+        return transport_with_auth(grant, make_provider(grant, interactive=False))
     if kind == "mcp_http":
         from mcp.client.streamable_http import streamablehttp_client
         url, headers = grant["url"], _headers(grant, secret)
@@ -307,13 +312,20 @@ def serialize_grant(doc: dict, for_owner: bool = False) -> dict:
         "write_count": sum(1 for t in tools if t.get("access") == "write"),
         "status": doc.get("status", "connected"),
         "error_message": doc.get("error_message"),
+        "auth": "oauth" if doc.get("kind") == "mcp_oauth" else "token",
+        "needs_reauth": bool((doc.get("oauth") or {}).get("needs_reauth")),
         "created_at": _iso(doc.get("created_at")),
         "last_used_at": _iso(doc.get("last_used_at")),
         "uses": doc.get("uses", 0),
     }
     if for_owner:
-        out["credential_state"] = secrets.status(doc.get("config_secret"))
-        out["has_credential"] = bool(doc.get("config_secret"))
+        if doc.get("kind") == "mcp_oauth":
+            tokens = (doc.get("oauth") or {}).get("tokens")
+            out["credential_state"] = "encrypted" if isinstance(tokens, str) and tokens.startswith("enc:") else ("plaintext" if tokens else "none")
+            out["has_credential"] = bool(tokens)
+        else:
+            out["credential_state"] = secrets.status(doc.get("config_secret"))
+            out["has_credential"] = bool(doc.get("config_secret"))
     return out
 
 

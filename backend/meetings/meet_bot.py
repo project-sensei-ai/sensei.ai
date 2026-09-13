@@ -56,6 +56,18 @@ CAPTION_SCRIPTS = [
 ]
 
 
+async def _snap(page, meeting_id: str, tag: str) -> None:
+    """A screenshot per stage, so a failure can be looked at rather than guessed."""
+    try:
+        import os
+        from core.config import settings
+        folder = os.path.join(settings.CHROMA_PERSIST_DIR, "meet-bot")
+        os.makedirs(folder, exist_ok=True)
+        await page.screenshot(path=os.path.join(folder, f"{meeting_id[:8]}-{tag}.png"))
+    except Exception:
+        pass
+
+
 async def _set_status(db, meeting_id: str, status: str, detail: str = "") -> None:
     await db.meetings.update_one(
         {"_id": meeting_id},
@@ -132,17 +144,38 @@ async def run_bot(db, chroma_client, meeting_id: str, user_id: str) -> None:
             await page.goto(url, wait_until="domcontentloaded", timeout=45000)
             await page.wait_for_timeout(4000)
 
-            # Guest entry: name, mic and camera off, ask to join.
+            # Guest entry: name, mic and camera off, ask to join. Meet shows the
+            # guest door only while the host is in the call; before that it
+            # says "You can't join this video call", and a sign-in wall means
+            # the meeting is restricted to the organisation.
             await _set_status(db, meeting_id, "at the door", "filling in a name and asking to join")
-            try:
-                name_box = page.locator('input[aria-label*="name" i], input[placeholder*="name" i]').first
-                await name_box.wait_for(state="visible", timeout=20000)
-                await name_box.fill(BOT_NAME)
-            except Exception:
+            name_box = None
+            for _ in range(20):        # up to ~2 minutes for the host to open the room
+                body = (await page.evaluate("document.body.innerText")) or ""
+                if "can't join this video call" in body or "can’t join this video call" in body:
+                    await _set_status(db, meeting_id, "waiting for the host",
+                                      "Meet says nobody can join yet — the host needs to be in the call first")
+                    await page.wait_for_timeout(6000)
+                    await page.goto(url, wait_until="domcontentloaded", timeout=45000)
+                    await page.wait_for_timeout(4000)
+                    continue
+                if "Sign in" in body and "Ask to join" not in body and "Join now" not in body:
+                    await _set_status(db, meeting_id, "error",
+                                      "This meeting requires a Google sign-in, so a guest cannot join. "
+                                      "Turn on 'Guests can join' (host controls → Access → Open), or use companion mode.")
+                    await browser.close()
+                    return
+                loc = page.locator('input[aria-label*="name" i], input[placeholder*="name" i]').first
+                if await loc.count() > 0 and await loc.is_visible():
+                    name_box = loc
+                    break
+                await page.wait_for_timeout(3000)
+            if name_box is None:
                 await _set_status(db, meeting_id, "error",
-                                  "Meet did not offer a guest name field — the link may require a Google sign-in")
+                                  "Meet never offered the guest door. The host must be in the call, and guests must be allowed.")
                 await browser.close()
                 return
+            await name_box.fill(BOT_NAME)
             await _click_if_present(page, ['[aria-label*="Turn off microphone"]', '[data-tooltip*="microphone"]'])
             await _click_if_present(page, ['[aria-label*="Turn off camera"]', '[data-tooltip*="camera"]'])
             joined = await _click_if_present(page, [
@@ -154,11 +187,26 @@ async def run_bot(db, chroma_client, meeting_id: str, user_id: str) -> None:
                 return
 
             await _set_status(db, meeting_id, "waiting to be admitted", "the host needs to let Sensei in")
+            await _snap(page, meeting_id, "asked")
             admitted = False
             for _ in range(120):   # up to ~4 minutes
                 if await page.locator('[aria-label*="Leave call"]').count() > 0:
                     admitted = True
                     break
+                # A request made before the host arrived is dropped by Meet;
+                # the door comes back. Knock again whenever it does.
+                body = (await page.evaluate("document.body.innerText")) or ""
+                if _ % 10 == 0:
+                    await _snap(page, meeting_id, "waiting")
+                if "Ask to join" in body or "Join now" in body:
+                    await _click_if_present(page, ['button:has-text("Ask to join")', 'button:has-text("Join now")'], timeout=2000)
+                elif "can't join this video call" in body or "can’t join this video call" in body or "Return to home screen" in body:
+                    await page.goto(url, wait_until="domcontentloaded", timeout=45000)
+                    await page.wait_for_timeout(4000)
+                    box = page.locator('input[aria-label*="name" i], input[placeholder*="name" i]').first
+                    if await box.count() > 0:
+                        await box.fill(BOT_NAME)
+                        await _click_if_present(page, ['button:has-text("Ask to join")', 'button:has-text("Join now")'], timeout=5000)
                 live = await db.meetings.find_one({"_id": meeting_id}, {"status": 1})
                 if not live or live.get("status") != "live":
                     await browser.close()
@@ -166,6 +214,7 @@ async def run_bot(db, chroma_client, meeting_id: str, user_id: str) -> None:
                     return
                 await page.wait_for_timeout(2000)
             if not admitted:
+                await _snap(page, meeting_id, "not-admitted")
                 await _set_status(db, meeting_id, "error", "Nobody admitted Sensei within four minutes")
                 await browser.close()
                 return
@@ -176,6 +225,7 @@ async def run_bot(db, chroma_client, meeting_id: str, user_id: str) -> None:
                 await page.keyboard.press("c")   # Meet's caption shortcut
             await page.wait_for_timeout(1500)
             await _post_to_chat(page, "Sensei here — I'll stay quiet unless someone asks me, or says something the project docs contradict.")
+            await _snap(page, meeting_id, "in-call")
             await _set_status(db, meeting_id, "listening", "reading live captions")
 
             seen: dict[str, str] = {}       # speaker -> last full text committed

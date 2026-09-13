@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import {
   AlertCircle, Check, ChevronDown, ChevronUp, Loader2, Lock, PenLine, Plug, Plus,
@@ -13,7 +13,9 @@ import { Label } from '@/components/ui/label'
 import { errorMessage } from '@/services/authApi'
 import {
   useConnectToolMutation,
+  useGetOAuthPresetsQuery,
   useGetToolsQuery,
+  useStartOAuthMutation,
   useRevokeToolMutation,
   useTestToolMutation,
   useUpdateToolMutation,
@@ -133,11 +135,18 @@ function GrantCard({ grant, canManage }: { grant: ToolGrant; canManage: boolean 
     <Card>
       <CardHeader className="pb-3">
         <div className="flex flex-wrap items-center gap-2">
-          <Badge variant="secondary" className="text-xs">{grant.kind === 'mcp_stdio' ? 'local process' : 'MCP server'}</Badge>
+          <Badge variant="secondary" className="text-xs">{grant.kind === 'mcp_stdio' ? 'local process' : grant.kind === 'mcp_oauth' ? 'OAuth connection' : 'MCP server'}</Badge>
           {grant.status === 'error' ? (
             <Badge variant="destructive" className="gap-1 text-xs"><AlertCircle className="h-3 w-3" /> not answering</Badge>
+          ) : grant.status === 'authorizing' ? (
+            <Badge variant="secondary" className="gap-1 text-xs"><Loader2 className="h-3 w-3 animate-spin" /> waiting for sign-in</Badge>
+          ) : grant.needs_reauth ? (
+            <Badge variant="outline" className="gap-1 border-amber-500/40 text-xs text-amber-600"><AlertCircle className="h-3 w-3" /> sign in again</Badge>
           ) : (
             <Badge variant="outline" className="gap-1 text-xs"><Check className="h-3 w-3 text-green-500" /> connected</Badge>
+          )}
+          {grant.auth === 'oauth' && (
+            <Badge variant="secondary" className="text-xs">signed in</Badge>
           )}
           {grant.credential_state === 'encrypted' && (
             <Badge variant="outline" className="gap-1 text-xs"><Lock className="h-3 w-3" /> credential encrypted</Badge>
@@ -202,7 +211,84 @@ function GrantCard({ grant, canManage }: { grant: ToolGrant; canManage: boolean 
   )
 }
 
-function ConnectPanel({ onClose }: { onClose: () => void }) {
+/**
+ * Sign-in connections. The owner clicks a service, logs in on the vendor's
+ * page, and Sensei receives a token it can refresh. Nothing is pasted.
+ */
+export function OAuthConnect({ onStarted, allowWrite = false }: { onStarted?: (name: string) => void; allowWrite?: boolean }) {
+  const { data } = useGetOAuthPresetsQuery()
+  const [startOAuth] = useStartOAuthMutation()
+  const [busy, setBusy] = useState<string | null>(null)
+  const [err, setErr] = useState('')
+  const [custom, setCustom] = useState('')
+
+  async function connect(name: string, url: string) {
+    setErr(''); setBusy(name)
+    // Open the window first, in the click, so popup blockers allow it.
+    const win = window.open('', 'sensei-oauth', 'width=640,height=780')
+    try {
+      const res = await startOAuth({ name, url, allow_write: allowWrite }).unwrap()
+      if (win) win.location.href = res.auth_url
+      else window.open(res.auth_url, 'sensei-oauth', 'width=640,height=780')
+      onStarted?.(name)
+    } catch (e) {
+      win?.close()
+      setErr(errorMessage(e))
+    } finally { setBusy(null) }
+  }
+
+  const presets = data?.presets ?? []
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="grid gap-2 sm:grid-cols-2">
+        {presets.map((p) => (
+          <button
+            key={p.id} type="button" disabled={!!busy} onClick={() => connect(p.name, p.url)}
+            className="group flex items-start gap-3 rounded-lg border bg-background px-3 py-2.5 text-left transition-colors hover:border-primary/60 hover:bg-muted/40 disabled:opacity-60"
+          >
+            <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-muted text-sm font-semibold">
+              {p.name.slice(0, 1)}
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="flex items-center gap-2 text-sm font-medium">
+                {busy === p.name ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plug className="h-3.5 w-3.5 text-muted-foreground group-hover:text-primary" />}
+                Sign in with {p.name}
+              </span>
+              <span className="block text-xs text-muted-foreground line-clamp-2">{p.blurb}</span>
+            </span>
+          </button>
+        ))}
+      </div>
+      <form
+        className="flex gap-2"
+        onSubmit={(e) => { e.preventDefault(); if (custom.trim()) connect(new URL(custom.trim()).hostname.replace(/^mcp\./, ''), custom.trim()) }}
+      >
+        <Input placeholder="Any other MCP server with sign-in: https://mcp.example.com/mcp" value={custom} onChange={(e) => setCustom(e.target.value)} disabled={!!busy} />
+        <Button type="submit" size="sm" variant="outline" disabled={!!busy || !custom.trim()}>Sign in</Button>
+      </form>
+      {err && <p className="text-xs text-destructive">{err}</p>}
+      <p className="text-xs text-muted-foreground">
+        A window opens on the service's own login page. Sensei never sees your password; it receives a token scoped to what you approve, encrypted at rest and refreshed on its own.
+      </p>
+    </div>
+  )
+}
+
+/** Refetch tools when a sign-in window reports back, and while any grant is still authorizing. */
+export function useOAuthCompletion(refetch: () => void, authorizing: boolean) {
+  useEffect(() => {
+    const onMsg = (ev: MessageEvent) => { if (ev.data?.type === 'sensei-oauth') refetch() }
+    window.addEventListener('message', onMsg)
+    return () => window.removeEventListener('message', onMsg)
+  }, [refetch])
+  useEffect(() => {
+    if (!authorizing) return
+    const t = setInterval(refetch, 3000)
+    return () => clearInterval(t)
+  }, [authorizing, refetch])
+}
+
+export function ConnectPanel({ onClose, embedded = false }: { onClose: () => void; embedded?: boolean }) {
   const [connectTool] = useConnectToolMutation()
   const [preset, setPreset] = useState(PRESETS[0])
   const [name, setName] = useState(PRESETS[0].name)
@@ -238,10 +324,21 @@ function ConnectPanel({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div className="flex flex-col gap-4 rounded-xl border bg-card p-5 shadow-lg">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold">Give the agent a tool</h3>
-        <Button size="icon" variant="ghost" className="h-7 w-7" onClick={onClose}><X className="h-4 w-4" /></Button>
+    <div className={embedded ? "flex flex-col gap-4" : "flex flex-col gap-4 rounded-xl border bg-card p-5 shadow-lg"}>
+      {!embedded && (
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold">Give the agent a tool</h3>
+          <Button size="icon" variant="ghost" className="h-7 w-7" onClick={onClose}><X className="h-4 w-4" /></Button>
+        </div>
+      )}
+
+      <div>
+        <p className="mb-2 text-xs font-medium text-muted-foreground">Sign in — nothing to paste</p>
+        <OAuthConnect onStarted={() => { if (!embedded) onClose() }} allowWrite={allowWrite} />
+      </div>
+
+      <div className="flex items-center gap-3 text-xs text-muted-foreground">
+        <span className="h-px flex-1 bg-border" /> or connect with a token <span className="h-px flex-1 bg-border" />
       </div>
 
       <div className="flex flex-wrap gap-1.5">
@@ -335,9 +432,10 @@ function ConnectPanel({ onClose }: { onClose: () => void }) {
  * class next to it.
  */
 export default function Tools() {
-  const { data, isLoading } = useGetToolsQuery()
+  const { data, isLoading, refetch } = useGetToolsQuery()
   const [showAdd, setShowAdd] = useState(false)
   const grants = data?.grants ?? []
+  useOAuthCompletion(refetch, grants.some((g) => g.status === 'authorizing'))
   const canManage = data?.can_manage ?? false
   const totalTools = grants.reduce((n, g) => n + g.tools.length, 0)
 

@@ -30,6 +30,18 @@ class Settings(BaseSettings):
     # has its own quota, so the product keeps working through a demo day on a
     # free key rather than going dark at the first "tokens per day" error.
     GROQ_FALLBACK_MODELS: str = "openai/gpt-oss-120b,qwen/qwen3.8-27b,qwen/qwen3.6-27b,openai/gpt-oss-20b"
+    # Extra OpenAI-compatible providers, tried after Groq's models when those
+    # are capped. Any of these keys being set adds that provider to the chain.
+    # All three have free tiers with no card and no local install.
+    CEREBRAS_API_KEY: str = ""
+    CEREBRAS_MODEL: str = "gpt-oss-120b"
+    CEREBRAS_BACKGROUND_MODEL: str = "llama-3.3-70b"
+    GEMINI_API_KEY: str = ""
+    GEMINI_MODEL: str = "gemini-2.5-flash"
+    GEMINI_BACKGROUND_MODEL: str = "gemini-2.5-flash-lite"
+    OPENROUTER_API_KEY: str = ""
+    OPENROUTER_MODEL: str = "openai/gpt-oss-120b:free"
+    OPENROUTER_BACKGROUND_MODEL: str = "openai/gpt-oss-20b:free"
     # How long a project's research findings stay reusable before the agent
     # goes and looks again.
     RESEARCH_TTL_HOURS: int = 24

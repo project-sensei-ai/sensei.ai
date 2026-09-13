@@ -234,7 +234,7 @@ async def stream_message(
                     break
                 except Exception as exc:
                     if attempt == 0 and is_quota_error(exc) and not answer_parts:
-                        mark_exhausted(model_named_in(exc) or getattr(getattr(col.agent, "model", None), "config", {}).get("model_id"))
+                        mark_exhausted(getattr(col.agent.model, "sensei_key", None) or model_named_in(exc))
                         col.close()
                         yield _sse({"type": "notice", "message": "One model hit its daily limit — switching to another."})
                         col = await _equip(db, chroma, session, user, session_id, body.question)
