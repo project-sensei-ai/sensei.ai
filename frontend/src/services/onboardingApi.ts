@@ -122,6 +122,37 @@ export interface Draft {
   updated_at: string | null
 }
 
+export interface Grant {
+  id: string
+  type: SourceType
+  label: string
+  status: SourceStatus
+  connected_at: string | null
+  chunks: number
+  credential_state: 'encrypted' | 'plaintext' | 'none' | null
+  credential?: string
+  ceiling?: string
+  floor?: string
+  cannot?: string[]
+  revoke?: string
+  improve?: string | null
+}
+
+export interface TrustOverview {
+  workspace: { name: string; role: WorkspaceRole }
+  grants: Grant[]
+  people: { name: string | null; email: string | null; role: string; status: string }[]
+  coverage: {
+    sources: number
+    indexed_chunks: number
+    people_with_access: number
+    pending_invites: number
+  }
+  never: string[]
+  encryption_configured: boolean
+  can_manage: boolean
+}
+
 export interface Unanswered {
   id: string
   question: string
@@ -290,6 +321,11 @@ const onboardingApi = api.injectEndpoints({
       providesTags: (_r, _e, gapId) => [{ type: 'Draft', id: gapId }],
     }),
 
+    getTrust: builder.query<TrustOverview, void>({
+      query: () => '/trust',
+      providesTags: ['Trust'],
+    }),
+
     getLedger: builder.query<
       { entries: Unanswered[]; can_answer: boolean; stats: LedgerStats },
       void
@@ -382,6 +418,7 @@ export const {
   useGetBriefsQuery,
   useRegenerateBriefMutation,
   useGetActivityQuery,
+  useGetTrustQuery,
   useGetLedgerQuery,
   useAnswerQuestionMutation,
   useDismissQuestionMutation,

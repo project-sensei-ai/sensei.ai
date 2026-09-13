@@ -13,6 +13,9 @@ class Settings(BaseSettings):
 
     # Auth
     JWT_SECRET: str = ""
+    # Encrypts source credentials at rest. Any long random string works.
+    # Generate with: openssl rand -hex 32
+    SECRET_ENCRYPTION_KEY: str = ""
     JWT_EXPIRE_DAYS: int = 7
     GOOGLE_CLIENT_ID: str = ""
 

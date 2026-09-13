@@ -12,6 +12,7 @@ import PendingAccess from './pages/PendingAccess'
 import Brief from './pages/Brief'
 import Gaps from './pages/Gaps'
 import Answers from './pages/Answers'
+import Trust from './pages/Trust'
 import ProtectedRoute from './components/ProtectedRoute'
 import OnboardingRoute from './components/OnboardingRoute'
 
@@ -79,6 +80,14 @@ function Router() {
           element={
             <ProtectedRoute>
               <Answers />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/trust"
+          element={
+            <ProtectedRoute>
+              <Trust />
             </ProtectedRoute>
           }
         />

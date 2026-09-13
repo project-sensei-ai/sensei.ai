@@ -18,6 +18,7 @@ from core.config import settings
 from db.database import ensure_indexes
 from ingest.routes import router as ingest_router
 from sources.routes import router as sources_router
+from trust.routes import router as trust_router
 from workspaces.routes import router as workspaces_router
 
 
@@ -95,6 +96,7 @@ app.include_router(briefs_router, prefix=f"{API_PREFIX}/briefs")
 app.include_router(gaps_router, prefix=f"{API_PREFIX}/gaps")
 app.include_router(activity_router, prefix=f"{API_PREFIX}/activity")
 app.include_router(answers_router, prefix=f"{API_PREFIX}/answers")
+app.include_router(trust_router, prefix=f"{API_PREFIX}/trust")
 
 
 def _health() -> dict:

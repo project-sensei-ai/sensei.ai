@@ -2,6 +2,7 @@
 import asyncio
 from datetime import datetime, timezone
 
+from core import secrets
 from db.chroma import get_workspace_collection
 from agent.tools import fetch_github, fetch_urls, parse_file, fetch_confluence
 
@@ -66,7 +67,7 @@ async def run_ingestion(db, chroma_client, source_id: str) -> None:
 
         if source["type"] == "github":
             cfg = source["config"]
-            secret = source.get("config_secret", {})
+            secret = secrets.decrypt_dict(source.get("config_secret"))
             raw_docs = await fetch_github(repo=cfg["repo"], pat=secret.get("pat", ""))
 
         elif source["type"] == "url":
@@ -81,7 +82,7 @@ async def run_ingestion(db, chroma_client, source_id: str) -> None:
 
         elif source["type"] == "confluence":
             cfg = source["config"]
-            secret = source.get("config_secret", {})
+            secret = secrets.decrypt_dict(source.get("config_secret"))
             raw_docs = await fetch_confluence(
                 base_url=cfg["base_url"],
                 email=cfg["email"],

@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, stat
 from pydantic import BaseModel, Field, field_validator
 
 from auth.deps import get_current_user
+from core import secrets
 from core.config import settings
 from db.chroma import get_chroma, get_workspace_collection
 from db.database import get_db
@@ -80,6 +81,8 @@ async def _verify_confluence(body) -> None:
     auth = _b64.b64encode(f"{body.email}:{body.api_token}".encode()).decode()
     headers = {"Authorization": f"Basic {auth}", "Accept": "application/json"}
 
+    # Runs before _source_doc, so the token here is still the one the owner
+    # typed. Nothing encrypted reaches this function.
     async with _httpx.AsyncClient(headers=headers, timeout=15, follow_redirects=True) as c:
         try:
             r = await c.get(f"{base}/rest/api/space", params={"limit": 100})
@@ -143,7 +146,9 @@ def _source_doc(workspace_id: str, source_type: str, label: str, config: dict, c
         "updated_at": now,
     }
     if config_secret:
-        doc["config_secret"] = config_secret
+        # Encrypted here rather than at each call site, so no future connector
+        # can forget to do it.
+        doc["config_secret"] = secrets.encrypt_dict(config_secret)
     return doc
 
 

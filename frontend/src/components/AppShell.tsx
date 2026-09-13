@@ -13,6 +13,7 @@ import {
   Sparkles,
   FileWarning,
   HelpCircle,
+  ShieldCheck,
 } from 'lucide-react'
 
 import { api } from '@/services/api'
@@ -59,6 +60,7 @@ const navMain = [
   { title: 'Your brief', icon: Sparkles, to: '/brief' },
   { title: 'Gaps', icon: FileWarning, to: '/gaps' },
   { title: 'Answers', icon: HelpCircle, to: '/answers' },
+  { title: 'Trust', icon: ShieldCheck, to: '/trust' },
   { title: 'Sources', icon: FolderGit2, to: '/sources' },
   { title: 'Chat', icon: MessageSquare, to: '/chat' },
 ]
