@@ -11,6 +11,7 @@ import {
   Moon,
   Sun,
   Sparkles,
+  FileWarning,
 } from 'lucide-react'
 
 import { api } from '@/services/api'
@@ -55,6 +56,7 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 const navMain = [
   { title: 'Dashboard', icon: LayoutDashboard, to: '/dashboard' },
   { title: 'Your brief', icon: Sparkles, to: '/brief' },
+  { title: 'Gaps', icon: FileWarning, to: '/gaps' },
   { title: 'Sources', icon: FolderGit2, to: '/sources' },
   { title: 'Chat', icon: MessageSquare, to: '/chat' },
 ]

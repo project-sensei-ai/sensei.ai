@@ -10,6 +10,7 @@ import Sources from './pages/Sources'
 import Join from './pages/Join'
 import PendingAccess from './pages/PendingAccess'
 import Brief from './pages/Brief'
+import Gaps from './pages/Gaps'
 import ProtectedRoute from './components/ProtectedRoute'
 import OnboardingRoute from './components/OnboardingRoute'
 
@@ -61,6 +62,14 @@ function Router() {
           element={
             <ProtectedRoute>
               <Brief />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/gaps"
+          element={
+            <ProtectedRoute>
+              <Gaps />
             </ProtectedRoute>
           }
         />

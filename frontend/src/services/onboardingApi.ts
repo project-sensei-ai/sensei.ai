@@ -82,6 +82,55 @@ export interface Brief {
   updated_at: string | null
 }
 
+export type GapKind = 'missing_document' | 'unowned_area' | 'dangling_reference' | 'thin_coverage'
+export type Severity = 'high' | 'medium' | 'low'
+
+export interface Gap {
+  id: string
+  title: string
+  kind: GapKind
+  detail: string
+  evidence: string[]
+  severity: Severity
+  can_draft: boolean
+  draft_from: string[]
+}
+
+export interface GapReport {
+  id: string
+  status: 'scanning' | 'ready' | 'error'
+  summary: string | null
+  gaps: Gap[]
+  error_message: string | null
+  updated_at: string | null
+}
+
+export interface DraftBody {
+  title: string
+  body_markdown: string
+  sources_used: string[]
+  assumptions: string[]
+}
+
+export interface Draft {
+  id: string
+  gap_id: string
+  gap_title: string | null
+  status: 'drafting' | 'ready' | 'error'
+  draft: DraftBody | null
+  error_message: string | null
+  updated_at: string | null
+}
+
+export interface ActivityEvent {
+  at: string | null
+  kind: 'brief' | 'audit' | 'draft' | 'source'
+  title: string
+  detail: string
+  /** True when the agent started this itself, rather than a person asking. */
+  unprompted: boolean
+}
+
 export interface AddMemberResult {
   email: string
   status: 'invited' | 'skipped'
@@ -200,6 +249,31 @@ const onboardingApi = api.injectEndpoints({
       invalidatesTags: ['Brief'],
     }),
 
+    getGaps: builder.query<{ report: GapReport | null }, void>({
+      query: () => '/gaps',
+      providesTags: ['Gap'],
+    }),
+
+    rescanGaps: builder.mutation<{ message: string }, void>({
+      query: () => ({ url: '/gaps/scan', method: 'POST' }),
+      invalidatesTags: ['Gap'],
+    }),
+
+    requestDraft: builder.mutation<{ message: string }, string>({
+      query: (gapId) => ({ url: `/gaps/${gapId}/draft`, method: 'POST' }),
+      invalidatesTags: (_r, _e, gapId) => [{ type: 'Draft', id: gapId }],
+    }),
+
+    getDraft: builder.query<{ draft: Draft | null }, string>({
+      query: (gapId) => `/gaps/${gapId}/draft`,
+      providesTags: (_r, _e, gapId) => [{ type: 'Draft', id: gapId }],
+    }),
+
+    getActivity: builder.query<{ events: ActivityEvent[]; unprompted_count: number }, void>({
+      query: () => '/activity',
+      providesTags: ['Activity'],
+    }),
+
     removeMember: builder.mutation<void, string>({
       query: (userId) => ({ url: `/workspaces/members/${userId}`, method: 'DELETE' }),
       invalidatesTags: ['Member'],
@@ -268,6 +342,11 @@ export const {
   useGetMyBriefQuery,
   useGetBriefsQuery,
   useRegenerateBriefMutation,
+  useGetActivityQuery,
+  useGetGapsQuery,
+  useRescanGapsMutation,
+  useRequestDraftMutation,
+  useGetDraftQuery,
   useJoinWorkspaceMutation,
   useDeleteSourceMutation,
   useListChatSessionsQuery,

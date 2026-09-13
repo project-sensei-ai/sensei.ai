@@ -1,9 +1,10 @@
 import { useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
-import { KeyRound, MessageSquare, Database, Sparkles, Users, X, Loader2 } from 'lucide-react'
+import { Activity, KeyRound, MessageSquare, Database, Sparkles, Users, X, Loader2 } from 'lucide-react'
 import { AppShell } from '@/components/AppShell'
 import TeamPanel from '@/components/TeamPanel'
-import { useGetMyBriefQuery, useGetMyWorkspaceQuery } from '@/services/onboardingApi'
+import ActivityFeed from '@/components/ActivityFeed'
+import { useGetActivityQuery, useGetMyBriefQuery, useGetMyWorkspaceQuery } from '@/services/onboardingApi'
 import {
   errorMessage,
   useGetMeQuery,
@@ -120,6 +121,7 @@ export default function Dashboard() {
   const { data: wsData } = useGetMyWorkspaceQuery()
   const { data: briefData } = useGetMyBriefQuery(undefined, { pollingInterval: 10000 })
   const briefRecord = briefData?.brief
+  const { data: activity } = useGetActivityQuery()
   const user = data?.user
   const workspace = wsData?.workspace
   const isOwner = workspace?.role !== 'member'
@@ -184,6 +186,25 @@ export default function Dashboard() {
           </Link>
         ))}
       </div>
+
+      {/* Autonomy, made visible. Everything above happened because someone
+          clicked; some of what follows happened because nobody did. */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Activity className="h-4 w-4 text-muted-foreground" />
+            What the agent has been doing
+          </CardTitle>
+          <CardDescription>
+            {activity?.unprompted_count
+              ? `${activity.unprompted_count} of these it started on its own.`
+              : 'Work it does in the background, without being asked.'}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ActivityFeed />
+        </CardContent>
+      </Card>
 
       {/* R3.4 — the second place an owner manages the allowlist. Same component
           as the onboarding wizard, so the rule cannot drift between them. */}
