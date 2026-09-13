@@ -4,7 +4,16 @@ A permission-aware platform that learns approved project context and participate
 
 ## What It Does
 
-New team members spend weeks getting up to speed. Existing members waste time searching for context that's scattered across docs, tickets, code, and chat. This agent joins your project like a teammate — it ingests your sources, builds a knowledge base, and answers questions with citations so you can trust the answer.
+New team members spend weeks getting up to speed, and existing ones lose hours
+to context scattered across docs, tickets, code and chat.
+
+Sensei does not wait to be asked. Adding a teammate makes it research the
+project and write them a cited brief. A source landing makes it audit what the
+project never wrote down, and offer to draft the missing documents. A question
+it cannot ground is recorded, so one human reply becomes knowledge it keeps.
+
+Asked directly, it answers with citations — streamed, narrating each tool call
+as it runs.
 
 ---
 
@@ -42,21 +51,21 @@ Three layers, kept simple.
 ├─────────────────────────────────────────────────────────────┤
 │  LAYER 3 — CAN WE ACCESS THIS SOURCE?                       │
 │  PATs / API tokens held per source in `config_secret`,      │
-│  never serialized to the frontend                           │
-│  Agent uses these to fetch content on behalf of the org     │
-│  ⚠ MVP: stored as plaintext in MongoDB. Envelope encryption │
-│    (KMS data key) is the first post-hackathon security task. │
+│  Fernet-encrypted at rest, never serialized to the frontend │
+│  Reads tolerate pre-encryption rows; writes never do        │
+│  /trust shows each credential's ceiling, not just its floor │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### Hackathon Simplification
+### Where the model stops short
 
-| What | Full Vision | MVP |
+| What | Full vision | Today |
 |---|---|---|
-| Login | OAuth (Google, GitHub, Microsoft) | Email + password only |
-| Roles | Owner, Admin, Member, Viewer | Owner + Member (both implemented) |
-| Source perms | Per-user, per-source ACL | Owner writes, members read; no per-item ACL yet |
-| Token storage | Vault / KMS envelope encryption | ⚠ Plaintext in MongoDB, withheld from API responses |
+| Login | OAuth (Google, GitHub, Microsoft) | Email + password, plus Google |
+| Roles | Owner, Admin, Member, Viewer | Owner + Member, both enforced |
+| Source perms | Per-user, per-item ACL filtering | Owner writes, members read. No per-item ACL — every member sees the same corpus |
+| Token storage | KMS envelope encryption | Fernet at rest via `SECRET_ENCRYPTION_KEY`. The key lives in the environment, not a KMS |
+| Freshness | Webhook-driven | Re-ingest on demand; an audit runs when a source lands |
 
 ---
 
@@ -385,6 +394,24 @@ caller's `role` so the UI can hide owner-only controls.
 | POST | `/api/ingest/{source_id}` | JWT + owner | Trigger ingestion as BackgroundTask (202); 409 if already indexing |
 | GET | `/api/ingest/{source_id}/status` | JWT + member | Poll status: pending / indexing / ready / error |
 
+**Agentic surfaces** — the work that starts without a prompt
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/api/briefs/me` | JWT + member | The brief written for the caller when they were added |
+| GET | `/api/briefs` | JWT | Owners see the team's; members see their own |
+| POST | `/api/briefs/regenerate` | JWT | Re-research and rewrite (owners may target anyone) |
+| GET | `/api/gaps` | JWT + member | Latest audit of what the project never wrote down |
+| POST | `/api/gaps/scan` | JWT + owner | Re-audit now (also runs on its own when a source lands) |
+| POST | `/api/gaps/{id}/draft` | JWT + owner | Ask the agent to write the missing document |
+| GET | `/api/gaps/{id}/draft` | JWT + member | The draft, with the assumptions it flagged |
+| GET | `/api/gaps/usage` | JWT + member | Tokens spent by background work, by operation |
+| GET | `/api/answers` | JWT | The ledger. Owners see all; members see their own |
+| POST | `/api/answers/{id}` | JWT + owner | Answer once — indexed, and known from then on |
+| DELETE | `/api/answers/{id}` | JWT + owner | Dismiss; not everything asked deserves documenting |
+| GET | `/api/activity` | JWT + member | What the agent did, and which of it was unprompted |
+| GET | `/api/trust` | JWT + member | Every grant, its real ceiling, and how to revoke it |
+
 **Chat Sessions**
 
 | Method | Path | Auth | Description |
@@ -392,7 +419,8 @@ caller's `role` so the UI can hide owner-only controls.
 | GET | `/api/chat/sessions` | JWT | List non-archived sessions (newest first, max 50) |
 | POST | `/api/chat/sessions` | JWT | Create empty session |
 | GET | `/api/chat/sessions/{id}` | JWT + owner | Full session with messages array |
-| POST | `/api/chat/sessions/{id}/messages` | JWT + owner | Send message → ChromaDB → Groq → persist → return answer + citations |
+| POST | `/api/chat/sessions/{id}/messages` | JWT + owner | Answer in one response. Kept for API clients |
+| POST | `/api/chat/sessions/{id}/stream` | JWT + owner | Server-sent events: tool calls as they run, then the answer token by token, then citations. What the UI uses |
 | DELETE | `/api/chat/sessions/{id}` | JWT + owner | Archive session (soft delete), 204 |
 
 ---
@@ -446,6 +474,32 @@ invites
 ├── invite_url
 ├── created_at
 └── expires_at      (7 days)
+
+briefs
+├── workspace_id + user_id  (unique together)
+├── status          (generating | ready | error)
+└── brief           typed: headline, sections[], reading_list[], people_to_meet[], open_questions[]
+
+gap_reports
+├── workspace_id    (unique)
+├── status          (scanning | ready | error)
+└── gaps[]          {id, title, kind, detail, evidence[], severity, can_draft, draft_from[]}
+
+drafts
+├── workspace_id + gap_id   (unique together)
+└── draft           {title, body_markdown, sources_used[], assumptions[]}
+
+unanswered
+├── workspace_id + question_key
+├── times_asked     repeats bump a counter, not a new row
+└── status          (open | answered | dismissed)
+
+research_cache
+├── workspace_id    (unique)
+└── findings        reused across every brief until the corpus changes
+
+token_usage
+└── per background operation, so spend is a query not a guess
 
 chat_sessions
 ├── _id             (UUID)

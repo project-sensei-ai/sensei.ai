@@ -1,141 +1,172 @@
 # Sensei
 
-Permission-aware AI platform that ingests your project sources (GitHub, files, URLs, Confluence) into a knowledge base and answers questions with cited sources. Built with Strands Agents SDK for the AWS hackathon.
+**A project teammate that does the work nobody asked it to do.**
+
+Most AI tools answer questions. Sensei starts before anyone asks one: when a
+project owner adds someone to a team, it researches the project and writes that
+person a cited onboarding brief. When a source finishes indexing, it audits what
+the project has *failed* to write down and offers to draft the missing documents
+itself. When it cannot answer something, it records the question so a single
+human reply turns into knowledge it has permanently.
+
+Built on the [Strands Agents SDK](https://strandsagents.com/).
 
 ![Architecture](docs/assets/architecture.png)
 
-- **[TESTING.md](TESTING.md)** — demo account, questions to try, how to exercise the invite flow
-- **[DEPLOY.md](DEPLOY.md)** — one-container deployment to Fly.io or AWS App Runner
-- **[docs/STRATEGY_AND_BUILD_PLAN.md](docs/STRATEGY_AND_BUILD_PLAN.md)** — market analysis and the road after the MVP
+- **[TESTING.md](TESTING.md)** — demo account, what to try
+- **[DEPLOY.md](DEPLOY.md)** — one-container deployment
+- **[docs/CONNECTOR_ACCESS.md](docs/CONNECTOR_ACCESS.md)** — what each credential actually grants
+- **[docs/AGENTIC_PLAN.md](docs/AGENTIC_PLAN.md)** — the design behind the autonomy
 
-## Prerequisites
+---
 
-- Python 3.12+
-- Node.js 18+
-- MongoDB Atlas account (free tier works)
-- Groq API key (free at [console.groq.com](https://console.groq.com))
+## What it does
+
+### Work that starts without a prompt
+
+| | |
+|---|---|
+| **Onboarding brief** | An owner adds someone. Nobody asks for anything. A Strands `Graph` of three agents researches the project *for that person* and writes a typed brief — what this is, who owns what, what to read first, and an honest list of what the sources cannot tell them. It is waiting when they first log in. |
+| **Gap hunter** | When a source lands, the agent audits its own knowledge for what is *absent*: documents that should exist, components with no owner, references that go nowhere. For gaps the sources can actually support, it offers to write the document — and flags every line it inferred rather than found. |
+| **Answer ledger** | A question it could not ground is recorded rather than discarded. An owner answers once, it is indexed, and the agent answers it for everyone from then on. The project gets documented by being used. |
+
+### Work you ask for
+
+- **Cited chat**, streamed token by token, narrating each tool call as it runs —
+  *"Taking stock of what's indexed… Searching the project's documents…"*
+- **Sources**: GitHub, Confluence, file upload, URL crawl
+- **Trust & access**: every grant, its real ceiling, and how to revoke it
+
+---
+
+## Trust
+
+The product's argument is that an agent with access to your project should be
+able to show exactly what that access is.
+
+- **Nobody reaches a project unless the owner added their email.** Invite tokens
+  are bound to one address and spent on first use. A link alone is not
+  authorisation.
+- **Passwords are never emailed.** An invite carries a single-use link and the
+  recipient sets their own.
+- **Credentials are encrypted at rest** with `SECRET_ENCRYPTION_KEY`, and never
+  returned by the API in any form.
+- **Every connector is read-only.** Nothing in this build writes to a connected
+  system.
+- **The Trust page states each credential's ceiling, not just what we read.**
+  A Confluence API token authorises as its owner across the whole site while
+  Sensei reads one space — and the page says so, because showing only the
+  narrower limit is a comfortable half-truth.
 
 ---
 
 ## Setup
 
-### Backend
+**Prerequisites:** Python 3.12+, Node 18+, MongoDB Atlas (free tier), and a
+model provider — [Groq](https://console.groq.com) is free and needs no AWS.
 
 ```bash
+# backend
 cd backend
-python3 -m venv venv
-source venv/bin/activate      # macOS/Linux
-# venv\Scripts\activate       # Windows
+python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env
+cp .env.example .env        # then edit it
+uvicorn main:app --reload --port 8000
+
+# frontend, second terminal
+cd frontend && npm install && npm run dev
 ```
 
-Edit `backend/.env`:
+Open http://localhost:5173.
+
+`backend/.env`:
 
 ```
 MONGO_DB=mongodb+srv://...
 MONGO_DB_NAME=sensei
-JWT_SECRET=your-secret-here
+JWT_SECRET=                 # openssl rand -hex 32
+SECRET_ENCRYPTION_KEY=      # openssl rand -hex 32
 GROQ_API_KEY=gsk_...
 CHROMA_PERSIST_DIR=./chroma_data
 FRONTEND_ORIGIN=http://localhost:5173
-DEBUG=true
+DEBUG=true                  # drops the Secure cookie flag so login works over HTTP
 ```
 
-> `DEBUG=true` is required for local HTTP — it drops the `Secure` flag on the
-> session cookie so login works without TLS.
+> Losing `SECRET_ENCRYPTION_KEY` makes existing sources unreadable — they have
+> to be reconnected.
 
-### Frontend
+### One container instead
 
 ```bash
-cd frontend
-npm install
+docker compose up --build      # builds the SPA and serves everything on :8000
+```
+
+The image builds the React app and FastAPI serves it alongside `/api/*`, so a
+deployment is one container and one URL — no CORS, no second service.
+
+### Tests
+
+```bash
+cd backend && python -m pytest tests/ -q      # 27 tests, no model calls, ~0.4s
 ```
 
 ---
 
-## Run
+## How it works
 
-Open two terminals:
+**Ingestion.** Each source is fetched, chunked at 800 characters and embedded
+into a per-workspace ChromaDB collection. Every chunk carries a provenance
+header — `[Confluence: ENG › Architecture doc]` — into the embedded text, so a
+document can be found by its own name. Chunks are 800 rather than 2000 because
+the default embedder truncates at 256 tokens; larger chunks are half-invisible
+to search.
 
-**Terminal 1 — Backend**
-```bash
-cd backend
-source venv/bin/activate
-uvicorn main:app --reload --port 8000
-```
+**Answering.** The Strands agent loop chooses its tools. `search_project_docs`
+for "what does X say", `list_project_knowledge` for "is there a doc about X" —
+a question about the shelf, not the books. Answers cite their sources, and the
+agent says so plainly when the project does not cover something.
 
-**Terminal 2 — Frontend**
-```bash
-cd frontend
-npm run dev
-```
+**Background work.** Briefs and audits run as background tasks. Research is
+cached per project and composed per person, so adding five teammates researches
+once rather than five times.
 
-- Frontend: http://localhost:5173
-- Backend API: http://localhost:8000/api
-- API docs (Swagger): http://localhost:8000/docs
-
-### Or run the whole thing in one container
-
-```bash
-docker compose up --build      # builds the SPA, serves everything on :8000
-```
-
-The image builds the React app and FastAPI serves it next to `/api/*`, so a
-deployment is one container and one URL — no CORS, no second service. In dev,
-Vite proxies `/api` straight through, so the paths are identical either way.
+**Model backends.** One flag. `LLM_BACKEND=bedrock | groq | ollama`. Background
+agents run a smaller model than interactive chat.
 
 ---
 
-## How It Works
+## Roles
 
-**As a project owner**
+| | Owner | Member |
+|---|---|---|
+| Connect and manage sources | ✅ | — |
+| Add and remove teammates | ✅ | — |
+| Answer ledger questions | ✅ | — |
+| Ask the agent, read its briefs | ✅ | ✅ |
+| See who has access | ✅ | ✅ |
 
-1. **Sign up** → create a workspace (one per user)
-2. **Add sources** — GitHub repo (PAT), file upload, URL, or Confluence
-3. **Ingest** — sources are chunked and embedded into ChromaDB (runs in background)
-4. **Invite your team** — generate a 7-day invite link from the onboarding wizard
-5. **Chat** — ask questions, get answers with inline citations linking back to the source
-
-**As a teammate**
-
-1. Open the invite link → sign up or log in (the invite token survives the redirect)
-2. You land in the owner's workspace as a **member**
-3. **Chat** straight away — you can read what the agent knows and ask anything
-
-Roles: **owners** connect and manage sources; **members** get read-only visibility
-into the source list and their own private chat sessions. Access is resolved in one
-place, `backend/db/membership.py`, so no route can accidentally skip the check.
-
-GitHub ingestion extracts 19 data types: file contents, commits, contributors, collaborators (including org owners), org members, teams, PRs with reviews, issues, branches, releases, milestones, and CI/CD workflows. See `Agents.md` for details.
+Members never see the onboarding wizard; it is an owner's tool.
 
 ---
 
-## Project Structure
+## Project structure
 
 ```
-agents-for-humans/
-├── backend/
-│   ├── main.py              # FastAPI app + lifespan (MongoDB + ChromaDB)
-│   ├── auth/                # JWT auth + Google OAuth
-│   ├── workspaces/          # Workspace CRUD + invite links + join
-│   ├── sources/             # Source management + file upload
-│   ├── ingest/              # Background ingestion trigger + status
-│   ├── chat/                # Chat sessions + Groq Q&A
-│   ├── agent/
-│   │   ├── tools.py         # Strands @tool functions (fetch_github, fetch_urls, etc.)
-│   │   └── ingest.py        # Chunking + ChromaDB upsert pipeline
-│   ├── db/                  # MongoDB + ChromaDB helpers
-│   │   └── membership.py    # require_workspace / require_owner — the access rule
-│   └── core/config.py       # Settings
-├── frontend/
-│   ├── src/
-│   │   ├── pages/           # Login, Register, Onboarding, Join, Sources, Chat, Dashboard
-│   │   ├── components/      # AppShell, ProtectedRoute, OnboardingRoute
-│   │   └── services/        # RTK Query API hooks
-│   └── vite.config.ts       # /api proxy → localhost:8000
-├── docs/
-│   ├── ARCHTECTRUE.md       # Full architecture, API map, DB schema
-│   └── PRD.md
-└── Agents.md                # Tool functions, AI layer, pipeline details
+backend/
+├── agent/          brief.py · gaps.py · tools.py · ingest.py · agent.py · usage.py
+├── answers/        the answer ledger
+├── channels/       channel abstraction + when to speak unbidden
+├── trust/          what the agent can reach and how to revoke it
+├── activity/       what it did, and which of it was unprompted
+├── auth/ workspaces/ sources/ ingest/ chat/ briefs/ gaps/
+├── core/           config · security · secrets · mailer
+├── db/             membership.py is the single access rule
+└── tests/          27 tests
+frontend/src/pages/ Dashboard · Brief · Gaps · Answers · Trust · Chat · Sources
 ```
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE).
