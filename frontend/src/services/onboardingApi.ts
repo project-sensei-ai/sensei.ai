@@ -57,6 +57,17 @@ export interface Member {
   invite_url?: string
 }
 
+export interface ChangeDigest {
+  id: string
+  headline: string
+  detail: string
+  affects: string[]
+  severity: 'notable' | 'minor'
+  sources: string[]
+  at: string | null
+  acknowledged: boolean
+}
+
 export interface BriefSection { heading: string; body: string; sources: string[] }
 export interface ReadingItem { title: string; source: string; why: string }
 export interface PersonToMeet { name: string; why: string }
@@ -78,6 +89,9 @@ export interface Brief {
   status: 'generating' | 'ready' | 'error'
   brief: BriefBody | null
   error_message: string | null
+  /** Set when the project moved after this brief was written. */
+  stale_reason?: string | null
+  stale_at?: string | null
   created_at: string | null
   updated_at: string | null
 }
@@ -321,6 +335,24 @@ const onboardingApi = api.injectEndpoints({
       providesTags: (_r, _e, gapId) => [{ type: 'Draft', id: gapId }],
     }),
 
+    getDigests: builder.query<{ digests: ChangeDigest[] }, void>({
+      query: () => '/watch',
+      providesTags: ['Digest'],
+    }),
+
+    checkForChanges: builder.mutation<
+      { checked: boolean; changed: boolean; material: boolean; message?: string; headline?: string },
+      void
+    >({
+      query: () => ({ url: '/watch/check', method: 'POST' }),
+      invalidatesTags: ['Digest', 'Brief', 'Activity'],
+    }),
+
+    ackDigest: builder.mutation<void, string>({
+      query: (id) => ({ url: `/watch/${id}/ack`, method: 'POST' }),
+      invalidatesTags: ['Digest'],
+    }),
+
     getTrust: builder.query<TrustOverview, void>({
       query: () => '/trust',
       providesTags: ['Trust'],
@@ -418,6 +450,9 @@ export const {
   useGetBriefsQuery,
   useRegenerateBriefMutation,
   useGetActivityQuery,
+  useGetDigestsQuery,
+  useCheckForChangesMutation,
+  useAckDigestMutation,
   useGetTrustQuery,
   useGetLedgerQuery,
   useAnswerQuestionMutation,

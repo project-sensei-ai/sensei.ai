@@ -101,6 +101,10 @@ def serialize_brief(doc: dict) -> dict:
         "status": doc.get("status", "generating"),
         "brief": doc.get("brief"),
         "error_message": doc.get("error_message"),
+        # Set when the watcher sees the project move under a brief written
+        # against how it used to be.
+        "stale_reason": doc.get("stale_reason"),
+        "stale_at": _iso(doc.get("stale_at")),
         "created_at": _iso(doc.get("created_at")),
         "updated_at": _iso(doc.get("updated_at")),
     }

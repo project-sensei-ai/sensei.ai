@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     # How long a project's research findings stay reusable before the agent
     # goes and looks again.
     RESEARCH_TTL_HOURS: int = 24
+    # How often the agent re-reads connected sources looking for change.
+    # 0 disables the loop; a manual check is always available.
+    WATCH_INTERVAL_MINUTES: int = 0
     # Output ceiling per model response.
     MAX_OUTPUT_TOKENS: int = 8000
     CHROMA_PERSIST_DIR: str = "./chroma_data"

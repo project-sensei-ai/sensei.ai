@@ -117,6 +117,24 @@ export default function Brief() {
           </Button>
         </div>
 
+        {/* Acting on a stale reading list is worse than having none. */}
+        {record.stale_reason && (
+          <Card className="border-amber-500/40 bg-amber-500/[0.04]">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <RefreshCw className="h-4 w-4 text-amber-600 dark:text-amber-500" />
+                The project has changed since this was written
+              </CardTitle>
+              <CardDescription>{record.stale_reason}</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button size="sm" onClick={() => regenerate()} disabled={regenerating}>
+                {regenerating ? 'Rewriting…' : 'Rewrite it'}
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+
         {brief.sections.map((s) => (
           <Card key={s.heading}>
             <CardHeader className="pb-3">

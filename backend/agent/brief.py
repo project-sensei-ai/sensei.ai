@@ -248,7 +248,8 @@ async def generate_brief(db, chroma_client, workspace_id: str, user_id: str) -> 
         await db.briefs.update_one(
             {"workspace_id": workspace_id, "user_id": user_id},
             {"$set": {"status": "ready", "brief": brief.model_dump(),
-                      "updated_at": datetime.now(timezone.utc), "error_message": None}},
+                      "updated_at": datetime.now(timezone.utc), "error_message": None},
+             "$unset": {"stale_reason": "", "stale_at": ""}},
         )
         print(f"[brief] wrote onboarding brief for {person} in {workspace.get('name')}")
     except Exception as exc:

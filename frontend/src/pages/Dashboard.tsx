@@ -1,10 +1,17 @@
 import { useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
-import { Activity, KeyRound, MessageSquare, Database, Sparkles, Users, X, Loader2 } from 'lucide-react'
+import { Activity, Bell, KeyRound, MessageSquare, Database, Sparkles, Users, X, Loader2 } from 'lucide-react'
 import { AppShell } from '@/components/AppShell'
 import TeamPanel from '@/components/TeamPanel'
 import ActivityFeed from '@/components/ActivityFeed'
-import { useGetActivityQuery, useGetMyBriefQuery, useGetMyWorkspaceQuery } from '@/services/onboardingApi'
+import {
+  useAckDigestMutation,
+  useCheckForChangesMutation,
+  useGetActivityQuery,
+  useGetDigestsQuery,
+  useGetMyBriefQuery,
+  useGetMyWorkspaceQuery,
+} from '@/services/onboardingApi'
 import {
   errorMessage,
   useGetMeQuery,
@@ -15,6 +22,7 @@ import {
   AlertDescription,
   AlertTitle,
 } from '@/components/ui/alert'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
   Card,
@@ -122,6 +130,11 @@ export default function Dashboard() {
   const { data: briefData } = useGetMyBriefQuery(undefined, { pollingInterval: 10000 })
   const briefRecord = briefData?.brief
   const { data: activity } = useGetActivityQuery()
+  const { data: digestData } = useGetDigestsQuery()
+  const [checkForChanges, { isLoading: checking }] = useCheckForChangesMutation()
+  const [ackDigest] = useAckDigestMutation()
+  const [checkResult, setCheckResult] = useState<string | null>(null)
+  const digests = (digestData?.digests ?? []).filter((d) => !d.acknowledged)
   const user = data?.user
   const workspace = wsData?.workspace
   const isOwner = workspace?.role !== 'member'
@@ -187,6 +200,35 @@ export default function Dashboard() {
         ))}
       </div>
 
+      {/* A material change is the most time-sensitive thing the agent produces,
+          so it sits above everything else it has done. */}
+      {digests.map((d) => (
+        <Card key={d.id} className="border-amber-500/40 bg-amber-500/[0.04]">
+          <CardHeader className="pb-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="mb-1 flex flex-wrap items-center gap-2">
+                  <Badge variant="outline" className="gap-1 border-amber-500/40 text-xs text-amber-700 dark:text-amber-500">
+                    <Bell className="h-3 w-3" /> The project changed
+                  </Badge>
+                  {d.affects.map((a) => (
+                    <Badge key={a} variant="secondary" className="text-xs">{a}</Badge>
+                  ))}
+                </div>
+                <CardTitle className="text-base">{d.headline}</CardTitle>
+                <CardDescription>{d.detail}</CardDescription>
+              </div>
+              <Button
+                size="sm" variant="ghost" className="shrink-0"
+                onClick={() => ackDigest(d.id)}
+              >
+                Dismiss
+              </Button>
+            </div>
+          </CardHeader>
+        </Card>
+      ))}
+
       {/* Autonomy, made visible. Everything above happened because someone
           clicked; some of what follows happened because nobody did. */}
       <Card>
@@ -201,8 +243,28 @@ export default function Dashboard() {
               : 'Work it does in the background, without being asked.'}
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="flex flex-col gap-3">
           <ActivityFeed />
+          {isOwner && (
+            <div className="flex flex-wrap items-center gap-3 border-t pt-3">
+              <Button
+                size="sm" variant="outline" className="gap-1.5"
+                disabled={checking}
+                onClick={async () => {
+                  const r = await checkForChanges().unwrap().catch(() => null)
+                  setCheckResult(r?.material ? null : (r?.message ?? 'Could not check just now.'))
+                }}
+              >
+                <Bell className={`h-3.5 w-3.5 ${checking ? 'animate-pulse' : ''}`} />
+                {checking ? 'Re-reading the sources…' : 'Check for changes'}
+              </Button>
+              {/* "Nothing changed" is a real answer and has to be shown, or a
+                  silent check looks like one that never ran. */}
+              {checkResult && (
+                <span className="text-xs text-muted-foreground">{checkResult}</span>
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
 

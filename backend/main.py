@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -19,7 +20,26 @@ from db.database import ensure_indexes
 from ingest.routes import router as ingest_router
 from sources.routes import router as sources_router
 from trust.routes import router as trust_router
+from watch.routes import router as watch_router
 from workspaces.routes import router as workspaces_router
+
+
+async def _watch_loop(app: FastAPI) -> None:
+    """Re-read every workspace's sources on an interval, and stay quiet unless
+    something material moved."""
+    from agent.watch import watch_workspace
+
+    interval = settings.WATCH_INTERVAL_MINUTES * 60
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            db = app.state.mongo_db
+            async for ws in db.workspaces.find({}):
+                await watch_workspace(db, app.state.chroma_client, ws["_id"])
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            print(f"[watch] loop error: {exc}")
 
 
 @asynccontextmanager
@@ -60,7 +80,18 @@ async def lifespan(app: FastAPI):
     if not settings.JWT_SECRET:
         print("[Auth] WARNING: JWT_SECRET is empty — login will fail until it is set")
 
+    # The background watch. Off unless an interval is configured, because a loop
+    # that re-reads every connected source on a timer costs API quota and
+    # provider tokens, and that should be a decision rather than a default.
+    watcher = None
+    if settings.WATCH_INTERVAL_MINUTES > 0 and app.state.mongo_db is not None:
+        watcher = asyncio.create_task(_watch_loop(app))
+        print(f"[watch] checking every {settings.WATCH_INTERVAL_MINUTES} min")
+
     yield
+
+    if watcher is not None:
+        watcher.cancel()
 
     if getattr(app.state, "mongo_client", None) is not None:
         app.state.mongo_client.close()
@@ -97,6 +128,7 @@ app.include_router(gaps_router, prefix=f"{API_PREFIX}/gaps")
 app.include_router(activity_router, prefix=f"{API_PREFIX}/activity")
 app.include_router(answers_router, prefix=f"{API_PREFIX}/answers")
 app.include_router(trust_router, prefix=f"{API_PREFIX}/trust")
+app.include_router(watch_router, prefix=f"{API_PREFIX}/watch")
 
 
 def _health() -> dict:
