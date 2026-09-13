@@ -21,6 +21,8 @@ from strands.multiagent import GraphBuilder
 
 from agent.agent import _build_model
 from agent.tools import make_inventory_tool, make_search_tool
+from agent import usage
+from core.config import settings
 
 RESCAN_DEBOUNCE = timedelta(minutes=10)
 
@@ -107,7 +109,7 @@ Rules:
 
 def _agent(system_prompt: str, tools: list | None = None) -> Agent:
     return Agent(
-        model=_build_model(),
+        model=_build_model(background=True),
         tools=tools or [],
         system_prompt=system_prompt,
         retry_strategy=ModelRetryStrategy(max_attempts=3, initial_delay=2, max_delay=8),
@@ -116,7 +118,7 @@ def _agent(system_prompt: str, tools: list | None = None) -> Agent:
 
 # ── Audit ─────────────────────────────────────────────────────────────────────
 
-async def audit_project(workspace_id: str, chroma_client) -> GapReport:
+async def audit_project(workspace_id: str, chroma_client, db=None) -> GapReport:
     search_tool, _ = make_search_tool(
         workspace_id, chroma_client, n_results=4, passage_chars=450, budget=4,
     )
@@ -133,6 +135,11 @@ async def audit_project(workspace_id: str, chroma_client) -> GapReport:
     result = await graph.invoke_async(
         "Audit this project's documentation and report what is missing."
     )
+    if db is not None:
+        await usage.record(db, workspace_id, "gaps.survey",
+                           getattr(result, "accumulated_usage", None),
+                           settings.GROQ_BACKGROUND_MODEL)
+
     node = result.results.get("survey")
     survey = str(node.result) if node is not None else ""
 
@@ -170,7 +177,7 @@ async def scan_gaps(db, chroma_client, workspace_id: str, force: bool = False) -
     )
 
     try:
-        report = await audit_project(workspace_id, chroma_client)
+        report = await audit_project(workspace_id, chroma_client, db)
         gaps = []
         for g in report.gaps:
             d = g.model_dump()

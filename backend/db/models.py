@@ -104,3 +104,28 @@ def serialize_brief(doc: dict) -> dict:
         "created_at": _iso(doc.get("created_at")),
         "updated_at": _iso(doc.get("updated_at")),
     }
+
+
+def serialize_gap_report(doc: dict) -> dict:
+    return {
+        "id": doc["_id"],
+        "workspace_id": doc["workspace_id"],
+        "status": doc.get("status", "scanning"),
+        "summary": doc.get("summary"),
+        "gaps": doc.get("gaps", []),
+        "error_message": doc.get("error_message"),
+        "created_at": _iso(doc.get("created_at")),
+        "updated_at": _iso(doc.get("updated_at")),
+    }
+
+
+def serialize_draft(doc: dict) -> dict:
+    return {
+        "id": doc["_id"],
+        "gap_id": doc["gap_id"],
+        "gap_title": doc.get("gap_title"),
+        "status": doc.get("status", "drafting"),
+        "draft": doc.get("draft"),
+        "error_message": doc.get("error_message"),
+        "updated_at": _iso(doc.get("updated_at")),
+    }

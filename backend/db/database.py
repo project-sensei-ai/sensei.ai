@@ -60,6 +60,17 @@ async def ensure_indexes(db) -> None:
     except Exception as exc:
         print(f"[DB] brief index warning: {exc}")
 
+    try:
+        await db.gap_reports.create_index("workspace_id", unique=True)
+        await db.drafts.create_index([("workspace_id", 1), ("gap_id", 1)], unique=True)
+    except Exception as exc:
+        print(f"[DB] gap index warning: {exc}")
+
+    try:
+        await db.research_cache.create_index("workspace_id", unique=True)
+    except Exception as exc:
+        print(f"[DB] research cache index warning: {exc}")
+
     # Chat session indexes
     await db.chat_sessions.create_index([("workspace_id", 1), ("archived", 1), ("updated_at", -1)])
     await db.chat_sessions.create_index([("owner_id", 1), ("archived", 1), ("updated_at", -1)])

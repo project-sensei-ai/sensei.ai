@@ -18,6 +18,14 @@ class Settings(BaseSettings):
 
     # Agent / Vector store
     GROQ_API_KEY: str = ""
+    # Interactive chat gets the capable model. Background agents — the ones that
+    # research briefs and audit for gaps — run a smaller one: they do bounded,
+    # well-specified work and there are many more of them.
+    GROQ_MODEL: str = "openai/gpt-oss-120b"
+    GROQ_BACKGROUND_MODEL: str = "openai/gpt-oss-20b"
+    # How long a project's research findings stay reusable before the agent
+    # goes and looks again.
+    RESEARCH_TTL_HOURS: int = 24
     CHROMA_PERSIST_DIR: str = "./chroma_data"
 
     # AWS / Bedrock AgentCore

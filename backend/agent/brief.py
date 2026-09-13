@@ -22,7 +22,9 @@ from strands import Agent
 from strands.multiagent import GraphBuilder
 
 from agent.agent import _build_model
+from core.config import settings
 from agent.tools import make_inventory_tool, make_search_tool
+from agent import usage
 
 
 # ── The artifact ──────────────────────────────────────────────────────────────
@@ -100,14 +102,14 @@ Rules:
 def _agent(system_prompt: str, tools: list | None = None) -> Agent:
     from strands import ModelRetryStrategy
     return Agent(
-        model=_build_model(),
+        model=_build_model(background=True),
         tools=tools or [],
         system_prompt=system_prompt,
         retry_strategy=ModelRetryStrategy(max_attempts=3, initial_delay=2, max_delay=8),
     )
 
 
-async def research_project(workspace_id: str, chroma_client) -> str:
+async def research_project(workspace_id: str, chroma_client, db=None) -> str:
     """Run the research graph and return the combined findings as text."""
     def fresh_search():
         """A tool instance per node. The search budget and the seen-chunks set
@@ -143,12 +145,63 @@ async def research_project(workspace_id: str, chroma_client) -> str:
         "Take stock of this project and research it for someone about to join the team."
     )
 
+    if db is not None:
+        await usage.record(db, workspace_id, "brief.research",
+                           getattr(result, "accumulated_usage", None),
+                           settings.GROQ_BACKGROUND_MODEL)
+
     parts = []
     for node_id in ("project_facts", "people_and_work"):
         node = result.results.get(node_id)
         if node is not None:
             parts.append(f"## Findings — {node_id.replace('_', ' ')}\n{node.result}")
     return "\n\n".join(parts) if parts else ""
+
+
+async def get_or_build_research(db, chroma_client, workspace_id: str) -> str:
+    """
+    Research findings for a project, reused across people.
+
+    Researching a project costs three agents and a dozen tool calls. Composing
+    one person's brief from findings costs a single call with no tools. Those
+    two facts were previously welded together, so adding five teammates ran the
+    same research five times to produce five nearly identical inputs.
+
+    Findings are cached per workspace and invalidated by the corpus changing —
+    `chunk_count` is a coarse fingerprint, but a source landing or being removed
+    is exactly when the research is genuinely stale, and that always moves it.
+    """
+    from datetime import timedelta
+
+    collection = None
+    chunk_count = 0
+    try:
+        from db.chroma import get_workspace_collection
+        collection = get_workspace_collection(chroma_client, workspace_id)
+        chunk_count = collection.count()
+    except Exception:
+        pass
+
+    cached = await db.research_cache.find_one({"workspace_id": workspace_id})
+    if cached and cached.get("chunk_count") == chunk_count and cached.get("findings"):
+        age_limit = timedelta(hours=settings.RESEARCH_TTL_HOURS)
+        when = cached.get("updated_at")
+        if when is not None:
+            if when.tzinfo is None:
+                when = when.replace(tzinfo=timezone.utc)
+            if datetime.now(timezone.utc) - when < age_limit:
+                print(f"[brief] reusing research for {workspace_id} ({chunk_count} chunks)")
+                return cached["findings"]
+
+    findings = await research_project(workspace_id, chroma_client, db)
+    await db.research_cache.update_one(
+        {"workspace_id": workspace_id},
+        {"$set": {"findings": findings, "chunk_count": chunk_count,
+                  "updated_at": datetime.now(timezone.utc)},
+         "$setOnInsert": {"_id": uuid4().hex}},
+        upsert=True,
+    )
+    return findings
 
 
 async def compose_brief(findings: str, person_name: str, project_name: str) -> OnboardingBrief:
@@ -184,12 +237,13 @@ async def generate_brief(db, chroma_client, workspace_id: str, user_id: str) -> 
     )
 
     try:
-        findings = await research_project(workspace_id, chroma_client)
+        findings = await get_or_build_research(db, chroma_client, workspace_id)
         if not findings.strip():
             raise RuntimeError(
                 "Nothing is indexed for this project yet, so there is nothing to brief on."
             )
         brief = await compose_brief(findings, person, workspace.get("name", "this project"))
+        await usage.record(db, workspace_id, "brief.compose", None, settings.GROQ_BACKGROUND_MODEL)
         await db.briefs.update_one(
             {"workspace_id": workspace_id, "user_id": user_id},
             {"$set": {"status": "ready", "brief": brief.model_dump(),

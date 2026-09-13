@@ -42,12 +42,16 @@ Do NOT call the tool for general programming questions, definitions, or topics c
 """
 
 
-def _build_model():
+def _build_model(background: bool = False):
     """
     The configured model, for any agent in the system.
 
     Shared so the chat agent and the background agents that write briefs cannot
     drift onto different backends — one LLM_BACKEND flag moves all of them.
+
+    `background=True` selects the cheaper model. Background work is bounded and
+    well-specified — survey these sources, compose this object — and there is a
+    lot more of it than there is chat.
     """
     if settings.LLM_BACKEND == "bedrock":
         import boto3
@@ -76,7 +80,7 @@ def _build_model():
         )
     from strands.models.openai import OpenAIModel
     return OpenAIModel(
-        model_id="openai/gpt-oss-120b",
+        model_id=settings.GROQ_BACKGROUND_MODEL if background else settings.GROQ_MODEL,
         client_args={
             "api_key": settings.GROQ_API_KEY,
             "base_url": "https://api.groq.com/openai/v1",

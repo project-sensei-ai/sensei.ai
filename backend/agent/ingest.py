@@ -130,6 +130,21 @@ async def run_ingestion(db, chroma_client, source_id: str) -> None:
             }},
         )
 
+        # The corpus changed, so any cached research about it is stale.
+        try:
+            await db.research_cache.delete_one({"workspace_id": source["workspace_id"]})
+        except Exception:
+            pass
+
+        # A source landing is an event worth reacting to: re-audit what the
+        # project still has not written down. Debounced inside scan_gaps, so
+        # connecting seven sources does not trigger seven audits.
+        try:
+            from agent.gaps import scan_gaps
+            await scan_gaps(db, chroma_client, source["workspace_id"])
+        except Exception as exc:
+            print(f"[gaps] post-ingest audit skipped: {exc}")
+
     except Exception as exc:
         await db.sources.update_one(
             {"_id": source_id},
