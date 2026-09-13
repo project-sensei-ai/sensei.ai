@@ -1,11 +1,20 @@
 from strands import Agent, ModelRetryStrategy
 
 from core.config import settings
-from .tools import make_search_tool, search_knowledge_base
+from .tools import make_inventory_tool, make_search_tool, search_knowledge_base
 
 SENSEI_SYSTEM_PROMPT = """You are Sensei, a permission-aware AI assistant embedded in a collaborative workspace.
 
 You have access to a tool called `search_project_docs` that queries the workspace knowledge base — which contains indexed GitHub repositories, documentation, uploaded files, and other sources.
+
+## Choosing a tool
+Two different questions need two different tools:
+- "What does the architecture say?" → `search_project_docs`. Searching passages.
+- "Is there a doc about architecture?" / "what do you know about?" / "which
+  sources do you have?" → `list_project_knowledge`. Reading the catalogue.
+
+Asking search for a question about what exists will return passages from whatever
+happens to discuss the topic, and miss a document whose title is the answer.
 
 ## Search budget
 Search **once**. Search a second time only if the first result genuinely missed the
@@ -24,7 +33,9 @@ Do NOT call the tool for general programming questions, definitions, or topics c
 
 ## How to answer
 - After searching, synthesise the retrieved passages into a clear, direct answer.
-- Cite sources inline: if a passage came from "my-repo", write [my-repo] after the claim.
+- Cite sources inline by their label: if a passage came from "my-repo", write
+  [my-repo] after the claim. Never emit numeric or dagger markers such as
+  【1†source】 or [1] — they render as noise and name nothing the reader can open.
 - If no relevant content is found, say so honestly — do not fabricate project details.
 - Keep answers concise; use markdown lists or code blocks where appropriate.
 - If the question is entirely general knowledge (no workspace angle), answer directly without calling the tool.
@@ -65,7 +76,7 @@ def build_agent(workspace_id: str, chroma_client, session_manager=None):
             },
         )
 
-    tools = [search_tool]
+    tools = [search_tool, make_inventory_tool(workspace_id, chroma_client)]
     if settings.BEDROCK_KB_ID:
         tools.append(search_knowledge_base)
 

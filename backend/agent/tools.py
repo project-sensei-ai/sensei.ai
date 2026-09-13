@@ -393,11 +393,23 @@ async def fetch_confluence(base_url: str, email: str, api_token: str, space_key:
     headers = {"Authorization": f"Basic {creds}", "Accept": "application/json"}
     results = []
 
+    base = base_url.rstrip("/")
+
     async with httpx.AsyncClient(headers=headers, timeout=30) as client:
-        params = {"spaceKey": space_key, "type": "page", "limit": 50, "expand": "body.storage"}
-        resp = await client.get(f"{base_url.rstrip('/')}/rest/api/content", params=params)
-        resp.raise_for_status()
-        pages = resp.json().get("results", [])
+        pages: list[dict] = []
+        start = 0
+        # One page of 50 silently truncated bigger spaces.
+        while len(pages) < 300:
+            resp = await client.get(f"{base}/rest/api/content", params={
+                "spaceKey": space_key, "type": "page", "limit": 50,
+                "start": start, "expand": "body.storage",
+            })
+            resp.raise_for_status()
+            batch = resp.json().get("results", [])
+            pages.extend(batch)
+            if len(batch) < 50:
+                break
+            start += 50
 
         for page in pages:
             html = page.get("body", {}).get("storage", {}).get("value", "")
@@ -409,10 +421,71 @@ async def fetch_confluence(base_url: str, email: str, api_token: str, space_key:
                         "source": "confluence",
                         "title": page.get("title", ""),
                         "page_id": page.get("id", ""),
-                        "url": f"{base_url}/pages/{page.get('id', '')}",
+                        "space_key": space_key,
+                        # webui is the link a person can actually open; the
+                        # hand-built /pages/{id} form 404s.
+                        "url": (page.get("_links", {}) or {}).get("webui")
+                        and f"{base}{page['_links']['webui']}"
+                        or f"{base}/spaces/{space_key}/pages/{page.get('id', '')}",
                     },
                 })
     return results
+
+
+def make_inventory_tool(workspace_id: str, chroma_client):
+    """
+    Factory for `list_project_knowledge`.
+
+    Semantic search answers "what does the architecture say?". It is the wrong
+    instrument for "is there a doc about architecture?" — that is a question
+    about the shelf, not the books, and similarity over body text will happily
+    return five passages from whatever else discusses the topic. This tool reads
+    the index's own catalogue instead.
+    """
+    from db.chroma import get_workspace_collection
+
+    @tool
+    def list_project_knowledge() -> str:
+        """
+        List every source indexed for this project and the documents inside each.
+
+        Call this for questions about WHAT EXISTS rather than what something says:
+        "is there a doc about X", "what do you know about this project",
+        "which sources do you have", "where would I find Y".
+        """
+        collection = get_workspace_collection(chroma_client, workspace_id)
+        if collection.count() == 0:
+            return "Nothing is indexed for this project yet."
+
+        got = collection.get(include=["metadatas"])
+        by_source: dict[str, dict[str, int]] = {}
+        for meta in got["metadatas"]:
+            label = meta.get("source_label") or "Unknown source"
+            item = (
+                meta.get("title")
+                or meta.get("path")
+                or (meta.get("data_type") or "").replace("_", " ")
+                or "content"
+            )
+            by_source.setdefault(label, {})
+            by_source[label][item] = by_source[label].get(item, 0) + 1
+
+        lines = [f"{len(by_source)} source(s) indexed for this project:\n"]
+        for label, items in sorted(by_source.items()):
+            total = sum(items.values())
+            lines.append(f"\n## {label}  ({total} chunks)")
+            for item, n in sorted(items.items(), key=lambda kv: -kv[1])[:30]:
+                lines.append(f"- {item}")
+            if len(items) > 30:
+                lines.append(f"- …and {len(items) - 30} more")
+
+        lines.append(
+            "\nThese are the only things indexed. Anything not listed here has not "
+            "been shared with the agent."
+        )
+        return "\n".join(lines)
+
+    return list_project_knowledge
 
 
 def make_search_tool(workspace_id: str, chroma_client):

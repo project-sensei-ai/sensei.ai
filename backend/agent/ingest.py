@@ -15,6 +15,28 @@ CHUNK_SIZE = 800
 CHUNK_OVERLAP = 150
 
 
+def _context_header(source_label: str, meta: dict) -> str:
+    """
+    A one-line provenance header prepended to every chunk before embedding.
+
+    Titles, file paths and repo names live in metadata, which the embedder never
+    sees — so "is there a doc about architecture?" could not match a page called
+    "Architecture doc" unless those words happened to appear in its body. Putting
+    them in the text makes the document's own name searchable, and it shows the
+    model where a passage came from without a second lookup.
+    """
+    bits = [source_label]
+    for key in ("title", "path", "repo", "url"):
+        val = meta.get(key)
+        if val and str(val) not in bits:
+            bits.append(str(val))
+            break
+    dt = meta.get("data_type")
+    if dt and dt not in ("file",):
+        bits.append(str(dt).replace("_", " "))
+    return "[" + " › ".join(bits) + "]\n"
+
+
 def _chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> list[str]:
     """Split text into overlapping character-based chunks."""
     if not text.strip():
@@ -73,10 +95,11 @@ async def run_ingestion(db, chroma_client, source_id: str) -> None:
         for doc in raw_docs:
             content = doc.get("content", "")
             meta = doc.get("metadata", {})
+            header = _context_header(source["label"], meta)
             for chunk in _chunk_text(content):
                 chunk_id = f"{source_id}_{chunk_index}"
                 ids.append(chunk_id)
-                documents.append(chunk)
+                documents.append(header + chunk)
                 metadatas.append({**meta, "source_id": source_id, "source_label": source["label"], "chunk": chunk_index})
                 chunk_index += 1
 
