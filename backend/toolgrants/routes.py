@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import Literal
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field, field_validator
 
@@ -128,7 +128,7 @@ async def oauth_presets():
 
 
 @router.post("/oauth/start", status_code=status.HTTP_202_ACCEPTED)
-async def oauth_start(body: OAuthStartIn, user=Depends(get_current_user), db=Depends(get_db)):
+async def oauth_start(body: OAuthStartIn, request: Request, user=Depends(get_current_user), db=Depends(get_db)):
     """
     Begin a login-based connection. Returns the vendor's login URL for the
     UI to open; the grant finishes in the background once the person is back.
@@ -138,11 +138,23 @@ async def oauth_start(body: OAuthStartIn, user=Depends(get_current_user), db=Dep
     if not url.startswith("https://"):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "OAuth servers must be https://")
     now = datetime.now(timezone.utc)
+    # A previous attempt at the same connection that never finished is noise,
+    # not history. Replace it rather than stacking a second card.
+    await db.tool_grants.delete_many({
+        "workspace_id": ws["_id"], "kind": "mcp_oauth", "name": body.name.strip(),
+        "status": {"$in": ["authorizing", "error"]},
+    })
+    # The browser's own origin (behind a proxy, the forwarded one) is where the
+    # vendor must send the person back.
+    origin = request.headers.get("origin") or request.headers.get("referer") or str(request.base_url)
+    origin = origin.split("/api/")[0].rstrip("/")
+    if origin.endswith("/onboarding") or origin.count("/") > 2:
+        origin = "/".join(origin.split("/")[:3])
     doc = {
         "_id": uuid4().hex, "workspace_id": ws["_id"], "name": body.name.strip(),
         "kind": "mcp_oauth", "url": url, "headers": {}, "command": None, "args": [],
         "allow_write": body.allow_write, "disabled_tools": [], "tools": [],
-        "status": "authorizing", "error_message": None, "oauth": {},
+        "status": "authorizing", "error_message": None, "oauth": {"origin": origin},
         "created_at": now, "created_by": user["id"], "uses": 0,
     }
     await db.tool_grants.insert_one(doc)

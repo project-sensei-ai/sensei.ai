@@ -48,8 +48,13 @@ def _sync_db():
     return _MONGO[settings.MONGO_DB_NAME]
 
 
-def redirect_uri(grant_id: str) -> str:
-    return f"{settings.FRONTEND_ORIGIN.rstrip('/')}/api/tools/oauth/callback/{grant_id}"
+def redirect_uri(grant_id: str, origin: str | None = None) -> str:
+    """Where the vendor sends the person back. Built from the origin the browser
+    actually used when available — the app is served from one port in
+    production and another in development, and a callback aimed at the wrong
+    one is a dead page after login."""
+    base = (origin or settings.FRONTEND_ORIGIN).rstrip("/")
+    return f"{base}/api/tools/oauth/callback/{grant_id}"
 
 
 class GrantTokenStorage:
@@ -125,11 +130,11 @@ class GrantTokenStorage:
         self.dirty = False
 
 
-def _client_metadata(grant_id: str, name: str):
+def _client_metadata(grant_id: str, name: str, origin: str | None = None):
     from mcp.shared.auth import OAuthClientMetadata
     return OAuthClientMetadata(
         client_name=f"Sensei — {name}",
-        redirect_uris=[redirect_uri(grant_id)],
+        redirect_uris=[redirect_uri(grant_id, origin)],
         grant_types=["authorization_code", "refresh_token"],
         response_types=["code"],
         token_endpoint_auth_method="none",
@@ -173,7 +178,8 @@ def make_provider(grant: dict, interactive: bool):
 
     provider = OAuthClientProvider(
         server_url=grant["url"],
-        client_metadata=_client_metadata(grant_id, grant.get("name", "connection")),
+        client_metadata=_client_metadata(grant_id, grant.get("name", "connection"),
+                                         (grant.get("oauth") or {}).get("origin")),
         storage=storage,
         redirect_handler=redirect_handler,
         callback_handler=callback_handler,
