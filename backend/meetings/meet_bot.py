@@ -188,6 +188,19 @@ async def run_bot(db, chroma_client, meeting_id: str, user_id: str) -> None:
 
             await _set_status(db, meeting_id, "waiting to be admitted", "the host needs to let Sensei in")
             await _snap(page, meeting_id, "asked")
+            # Google's answer to an automated guest is usually immediate: a
+            # refusal page, or a page that renders nothing at all. Say so now
+            # rather than after four minutes of silence.
+            await page.wait_for_timeout(5000)
+            after = (await page.evaluate("document.body.innerText")) or ""
+            if "can't join this video call" in after or "can’t join this video call" in after or not after.strip():
+                await _snap(page, meeting_id, "refused")
+                await _set_status(db, meeting_id, "error",
+                                  "Google Meet refused the automated guest right after it knocked. This happens for "
+                                  "unsigned-in browsers driven by automation. Use companion mode beside the call — "
+                                  "same judgement, and it works.")
+                await browser.close()
+                return
             admitted = False
             for _ in range(120):   # up to ~4 minutes
                 if await page.locator('[aria-label*="Leave call"]').count() > 0:

@@ -414,7 +414,7 @@ export default function Meetings() {
                 {(['companion', 'meet_bot'] as const).map((m) => (
                   <button key={m} type="button" onClick={() => setMode(m)}
                     className={`rounded-full border px-3 py-1 text-xs ${mode === m ? 'border-primary bg-primary/10 text-primary' : 'text-muted-foreground hover:text-foreground'}`}>
-                    {m === 'companion' ? 'Companion (this device)' : 'Join a Google Meet'}
+                    {m === 'companion' ? 'Companion (this device)' : 'Join a Google Meet (experimental)'}
                   </button>
                 ))}
               </div>
@@ -426,7 +426,7 @@ export default function Meetings() {
               </div>
               {mode === 'meet_bot' && (
                 <p className="text-xs text-muted-foreground">
-                  Sensei joins as a guest named "Sensei (AI colleague)". The host admits it, it turns on captions, and posts replies in the meeting chat. Google changes Meet often — the bot reports each step here so a failure is visible, not silent.
+                  Sensei tries to join as a guest named "Sensei (AI colleague)", reads the captions, and replies in the meeting chat. Google often refuses automated guests outright — the bot reports each step here, and says so if it is turned away. Companion mode beside the call is the dependable option.
                 </p>
               )}
               {err && <p className="text-xs text-destructive">{err}</p>}
