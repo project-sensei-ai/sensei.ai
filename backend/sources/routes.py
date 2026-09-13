@@ -45,12 +45,22 @@ class ConfluenceSourceIn(BaseModel):
     @field_validator("base_url")
     @classmethod
     def _looks_like_a_site(cls, v: str) -> str:
+        """
+        Accept whatever is in the address bar. People paste the page they are
+        looking at, not the site root, so trim a full page URL down to the site:
+            https://x.atlassian.net/wiki/spaces/ENG/pages/393218/Some+Doc
+                 -> https://x.atlassian.net/wiki
+        """
         v = v.strip().rstrip("/")
         if not v.startswith(("http://", "https://")):
             raise ValueError(
                 "Confluence site must be a URL, like https://your-org.atlassian.net/wiki "
                 "— copy it from the address bar of your Confluence tab"
             )
+        marker = "/wiki"
+        idx = v.find(marker + "/")
+        if idx != -1:
+            v = v[: idx + len(marker)]
         return v
 
 
@@ -97,14 +107,26 @@ async def _verify_confluence(body) -> None:
                 f"Confluence returned {r.status_code} when listing spaces.",
             )
 
-        keys = [s.get("key", "") for s in r.json().get("results", [])]
+        spaces = r.json().get("results", [])
+        keys = {sp.get("key", "") for sp in spaces}
+
         if space_key not in keys:
-            visible = ", ".join(k for k in keys if k and not k.startswith("~")) or "none"
-            raise HTTPException(
-                status.HTTP_422_UNPROCESSABLE_ENTITY,
-                f"No space with key '{space_key}' is visible to this account. "
-                f"Spaces it can see: {visible}",
-            )
+            # The listing is paginated and may omit personal spaces, so ask for
+            # this exact key before deciding it does not exist.
+            direct = await c.get(f"{base}/rest/api/space/{space_key}")
+            if direct.status_code != 200:
+                def describe(sp: dict) -> str:
+                    key = sp.get("key", "")
+                    name = sp.get("name", "")
+                    kind = " (personal)" if key.startswith("~") else ""
+                    return f"{key}{kind} — {name}" if name else f"{key}{kind}"
+
+                visible = "; ".join(describe(sp) for sp in spaces if sp.get("key")) or "none"
+                raise HTTPException(
+                    status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    f"No space with key '{space_key}' is visible to this account. "
+                    f"Spaces it can see: {visible}",
+                )
 
 
 def _source_doc(workspace_id: str, source_type: str, label: str, config: dict, config_secret: dict | None = None) -> dict:

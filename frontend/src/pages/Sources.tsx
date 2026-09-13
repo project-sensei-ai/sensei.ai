@@ -15,6 +15,7 @@ import {
 } from 'lucide-react'
 import { AppShell } from '@/components/AppShell'
 import { errorMessage } from '@/services/authApi'
+import { parseConfluenceUrl } from '@/lib/confluence'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -116,6 +117,17 @@ function SourceCard({ source, canManage }: { source: Source; canManage: boolean 
 // ── Add-source panel ───────────────────────────────────────────────────────────
 
 type Tab = 'file' | 'url' | 'github' | 'confluence'
+
+/** Personal space keys are case-sensitive and start with ~; only shout the rest. */
+function normaliseSpaceKey(v: string): string {
+  const k = v.trim()
+  return k.startsWith('~') ? k : k.toUpperCase()
+}
+
+function labelForSpace(v: string): string {
+  const k = normaliseSpaceKey(v)
+  return k.startsWith('~') ? 'personal space' : k
+}
 
 interface GithubRepo { full_name: string; description: string | null; private: boolean }
 
@@ -230,8 +242,8 @@ function AddSourcePanel({ onClose }: { onClose: () => void }) {
         type: 'confluence',
         ...conf,
         base_url: conf.base_url.trim().replace(/\/+$/, ''),
-        space_key: conf.space_key.trim().toUpperCase(),
-        label: `Confluence: ${conf.space_key.trim().toUpperCase()}`,
+        space_key: normaliseSpaceKey(conf.space_key),
+        label: `Confluence: ${labelForSpace(conf.space_key)}`,
       }).unwrap()
       await triggerIngest(res.source.id).unwrap().catch(() => {})
       onClose()
@@ -240,8 +252,17 @@ function AddSourcePanel({ onClose }: { onClose: () => void }) {
     } finally { setConfBusy(false) }
   }
 
-  const setConfField = (k: keyof typeof conf) => (e: React.ChangeEvent<HTMLInputElement>) =>
-    setConf((c) => ({ ...c, [k]: e.target.value }))
+  const setConfField = (k: keyof typeof conf) => (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value
+    if (k === 'base_url') {
+      // Pasting a page URL fills the space key too, rather than making them
+      // pick the site and the key out of the same string themselves.
+      const { site, spaceKey } = parseConfluenceUrl(value)
+      setConf((c) => ({ ...c, base_url: site, space_key: spaceKey ?? c.space_key }))
+      return
+    }
+    setConf((c) => ({ ...c, [k]: value }))
+  }
 
   const TABS: { id: Tab; label: string }[] = [
     { id: 'file', label: 'File Upload' },
@@ -396,6 +417,9 @@ function AddSourcePanel({ onClose }: { onClose: () => void }) {
               <label className="text-xs font-medium">Confluence site</label>
               <Input placeholder="https://your-org.atlassian.net/wiki"
                 value={conf.base_url} onChange={setConfField('base_url')} required disabled={confBusy} />
+              <p className="text-xs text-muted-foreground">
+                Paste any Confluence page URL — the site and space key are pulled out of it.
+              </p>
             </div>
             <div className="flex flex-col gap-1.5">
               <label className="text-xs font-medium">Account email</label>
@@ -429,7 +453,7 @@ function AddSourcePanel({ onClose }: { onClose: () => void }) {
             <ul className="mt-2 flex flex-col gap-1 text-muted-foreground">
               <li>
                 <span className="text-foreground">Sensei reads:</span> pages in the{' '}
-                <span className="font-mono">{conf.space_key.trim().toUpperCase() || 'SPACE'}</span>{' '}
+                <span className="font-mono">{labelForSpace(conf.space_key) || 'SPACE'}</span>{' '}
                 space only. Nothing else is fetched or indexed.
               </li>
               <li>
