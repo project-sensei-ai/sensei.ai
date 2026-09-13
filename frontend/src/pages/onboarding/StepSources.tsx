@@ -9,7 +9,7 @@ import { useAddSourceMutation, useUploadFileMutation, useTriggerIngestMutation, 
 import { CheckCircle, Clock, Loader2, AlertCircle, ShieldCheck } from 'lucide-react'
 import FieldHelp from '@/components/FieldHelp'
 
-type Tab = 'github' | 'file' | 'url' | 'confluence' | 'jira'
+type Tab = 'github' | 'file' | 'url' | 'confluence' | 'jira' | 'slack'
 
 interface Props {
   workspaceId: string
@@ -42,6 +42,7 @@ export default function StepSources({ onDone }: Props) {
     { id: 'url', label: 'URL' },
     { id: 'confluence', label: 'Confluence' },
     { id: 'jira', label: 'Jira' },
+    { id: 'slack', label: 'Slack' },
   ]
 
   return (
@@ -73,6 +74,7 @@ export default function StepSources({ onDone }: Props) {
         {tab === 'url' && <UrlTab onAdd={afterAdd} addSource={addSource} />}
         {tab === 'confluence' && <ConfluenceTab onAdd={afterAdd} addSource={addSource} />}
         {tab === 'jira' && <JiraTab onAdd={afterAdd} addSource={addSource} />}
+        {tab === 'slack' && <SlackTab onAdd={afterAdd} addSource={addSource} />}
 
         {/* Added sources list */}
         {addedSources.length > 0 && (
@@ -533,6 +535,83 @@ function JiraTab({ onAdd, addSource }: any) {
       {err && <p className="text-sm text-destructive">{err}</p>}
       <Button type="submit" disabled={busy || !form.base_url || !form.email || !form.api_token || !form.project_key} size="sm">
         {busy ? 'Adding…' : 'Add Jira project'}
+      </Button>
+    </form>
+  )
+}
+
+function SlackTab({ onAdd, addSource }: any) {
+  const [form, setForm] = useState({ token: '', channel: '' })
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+
+  const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement>) => setForm((f) => ({ ...f, [k]: e.target.value }))
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault()
+    setErr('')
+    setBusy(true)
+    const channel = form.channel.trim().toLowerCase().replace(/^#/, '')
+    try {
+      const res = await addSource({
+        type: 'slack',
+        token: form.token,
+        channel,
+        label: `Slack: #${channel}`,
+      }).unwrap()
+      onAdd(res.source)
+      setForm({ token: '', channel: '' })
+    } catch (e: any) {
+      setErr(errorMessage(e) || 'Failed to add Slack source')
+    } finally { setBusy(false) }
+  }
+
+  return (
+    <form onSubmit={submit} className="flex flex-col gap-3">
+      <div className="grid grid-cols-2 gap-3">
+        <div className="flex flex-col gap-1.5 col-span-2">
+          <Label className="flex items-center gap-1">
+            Bot token
+            <FieldHelp text={
+              '1. Open api.slack.com/apps → Create New App → From scratch\n' +
+              '2. Under OAuth & Permissions add scope channels:history, channels:read, groups:history, users:read\n' +
+              '3. Install to Workspace → copy the xoxb-… OAuth token'
+            } />
+          </Label>
+          <Input type="password" placeholder="xoxb-…" value={form.token} onChange={set('token')} required disabled={busy} />
+        </div>
+        <div className="flex flex-col gap-1.5 col-span-2">
+          <Label className="flex items-center gap-1">
+            Channel
+            <FieldHelp text="The channel to index, e.g. general. The bot must be added to it — open the channel → Details → Add apps." />
+          </Label>
+          <Input placeholder="general" value={form.channel} onChange={set('channel')} required disabled={busy} />
+        </div>
+      </div>
+
+      <div className="rounded-lg border bg-muted/30 p-3 text-xs leading-relaxed">
+        <p className="flex items-center gap-1.5 font-medium text-foreground">
+          <ShieldCheck className="h-3.5 w-3.5" /> What this grants
+        </p>
+        <ul className="mt-2 flex flex-col gap-1 text-muted-foreground">
+          <li>
+            <span className="text-foreground">Sensei reads:</span> #{form.channel.trim().replace(/^#/, '') || 'channel'}{' '}
+            only.
+          </li>
+          <li>
+            <span className="text-foreground">The token could reach:</span> every channel
+            this Slack app has been added to — Slack cannot narrow a bot token to one channel.
+          </li>
+          <li>
+            <span className="text-foreground">So:</span> add the bot to only the channels
+            this work involves. The invite is the grant; removing the app is the revocation.
+          </li>
+        </ul>
+      </div>
+
+      {err && <p className="text-sm text-destructive">{err}</p>}
+      <Button type="submit" disabled={busy || !form.token || !form.channel.trim()} size="sm">
+        {busy ? 'Adding…' : 'Add Slack channel'}
       </Button>
     </form>
   )

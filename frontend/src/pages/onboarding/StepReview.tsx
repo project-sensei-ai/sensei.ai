@@ -21,6 +21,7 @@ const TYPE_LABELS: Record<string, string> = {
   url: 'URL',
   confluence: 'Confluence',
   jira: 'Jira',
+  slack: 'Slack',
 }
 
 export default function StepReview({ onDone }: Props) {

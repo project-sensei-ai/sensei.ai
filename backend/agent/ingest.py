@@ -4,7 +4,9 @@ from datetime import datetime, timezone
 
 from core import secrets
 from db.chroma import get_workspace_collection
-from agent.tools import fetch_github, fetch_urls, parse_file, fetch_confluence, fetch_jira
+from agent.tools import (
+    fetch_github, fetch_urls, parse_file, fetch_confluence, fetch_jira, fetch_slack,
+)
 
 
 # ChromaDB's default embedder (ONNX all-MiniLM-L6-v2) truncates its input at 256
@@ -86,6 +88,16 @@ async def _fetch_source_docs(source: dict) -> list[dict]:
             email=cfg["email"],
             api_token=secret.get("api_token", ""),
             project_key=cfg["project_key"],
+        )
+
+    if source["type"] == "slack":
+        cfg = source["config"]
+        secret = secrets.decrypt_dict(source.get("config_secret"))
+        return await fetch_slack(
+            bot_token=secret.get("token", ""),
+            channel_id=cfg["channel_id"],
+            channel_name=cfg["channel_name"],
+            team_domain=cfg["team_domain"],
         )
 
     return []

@@ -19,7 +19,7 @@ export interface SourceStats {
   pages_crawled?: number
 }
 
-export type SourceType = 'github' | 'file' | 'url' | 'confluence' | 'jira'
+export type SourceType = 'github' | 'file' | 'url' | 'confluence' | 'jira' | 'slack'
 export type SourceStatus = 'pending' | 'indexing' | 'ready' | 'error'
 
 export interface Source {
@@ -253,6 +253,7 @@ export type AddSourceInput =
   | { type: 'url'; urls: string[]; label?: string }
   | { type: 'confluence'; base_url: string; email: string; api_token: string; space_key: string; label?: string }
   | { type: 'jira'; base_url: string; email: string; api_token: string; project_key: string; label?: string }
+  | { type: 'slack'; token: string; channel: string; label?: string }
 
 // ── Injected endpoints ────────────────────────────────────────────────────────
 

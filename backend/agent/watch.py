@@ -84,7 +84,9 @@ async def _record_check(db, source: dict, fingerprint: dict[str, str]) -> None:
 
 
 async def _fetch(source: dict) -> list[dict]:
-    from agent.tools import fetch_confluence, fetch_github, fetch_urls, fetch_jira
+    from agent.tools import (
+        fetch_confluence, fetch_github, fetch_urls, fetch_jira, fetch_slack,
+    )
     secret = secrets.decrypt_dict(source.get("config_secret"))
     cfg = source.get("config", {})
     if source["type"] == "github":
@@ -100,6 +102,13 @@ async def _fetch(source: dict) -> list[dict]:
         return await fetch_jira(
             base_url=cfg["base_url"], email=cfg["email"],
             api_token=secret.get("api_token", ""), project_key=cfg["project_key"],
+        )
+    if source["type"] == "slack":
+        return await fetch_slack(
+            bot_token=secret.get("token", ""),
+            channel_id=cfg["channel_id"],
+            channel_name=cfg["channel_name"],
+            team_domain=cfg["team_domain"],
         )
     return []          # uploaded files cannot change underneath us
 

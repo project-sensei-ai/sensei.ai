@@ -1,6 +1,7 @@
 """Strands @tool functions for fetching content from each source type."""
 import io
 import os
+import re
 
 import httpx
 from bs4 import BeautifulSoup
@@ -602,6 +603,128 @@ async def fetch_jira(base_url: str, email: str, api_token: str, project_key: str
             })
 
     return results
+
+
+_SLACK_MENTION = re.compile(r"<@([UW][A-Z0-9]+)>")
+_SLACK_LINK = re.compile(r"<([^|>]+)\|([^>]+)>")
+
+
+def _strip_mrkdwn(text: str, users: dict[str, str]) -> str:
+    """
+    Collapse Slack mrkdwn back into plain, searchable text:
+        <@U123|Name>   ->  Name            (label already on the link)
+        <@U123>        ->  resolved name   (or the raw id when unknown)
+        <url|label>    ->  label           (link UI text, not the URL)
+        <url>          ->  url
+    Bold / italics / code markers are left alone — they survive embedding fine.
+    """
+    if not text:
+        return text
+    text = re.sub(r"<@([UW][A-Z0-9]+)\|([^>]+)>", r"\2", text)
+    text = _SLACK_MENTION.sub(lambda m: users.get(m.group(1), m.group(1)), text)
+    text = _SLACK_LINK.sub(r"\2", text)
+    text = re.sub(r"<[^>]+>", lambda m: m.group(0)[1:-1], text)
+    return text
+
+
+async def fetch_slack(bot_token: str, channel_id: str, channel_name: str, team_domain: str) -> list[dict]:
+    """
+    Fetch recent messages and threaded replies from one Slack channel.
+
+    Names are resolved once per run (users.list) so `@U123` becomes a display
+    name; messages and replies each become their own document, the way Jira
+    comments do. Permalinks are the universal Slack form
+    https://{team_domain}.slack.com/archives/{channel}/{ts}.
+    """
+    headers = {"Authorization": f"Bearer {bot_token}", "Content-Type": "application/json"}
+    base = "https://slack.com/api"
+
+    async with httpx.AsyncClient(headers=headers, timeout=30) as client:
+        users: dict[str, str] = {}
+        cursor = None
+        while True:
+            params: dict = {"limit": 200}
+            if cursor:
+                params["cursor"] = cursor
+            resp = await client.get(f"{base}/users.list", params=params)
+            payload = resp.json()
+            if not payload.get("ok"):
+                raise RuntimeError(f"Slack users.list failed: {payload.get('error')}")
+            for u in payload.get("members", []):
+                if u.get("deleted"):
+                    continue
+                profile = u.get("profile") or {}
+                users[u["id"]] = profile.get("display_name") or u.get("name") or u["id"]
+            cursor = (payload.get("response_metadata") or {}).get("next_cursor")
+            if not cursor:
+                break
+
+        results: list[dict] = []
+        cursor = None
+        while len(results) < 300:
+            params = {"channel": channel_id, "limit": 100}
+            if cursor:
+                params["cursor"] = cursor
+            resp = await client.get(f"{base}/conversations.history", params=params)
+            payload = resp.json()
+            if not payload.get("ok"):
+                raise RuntimeError(f"Slack conversations.history failed: {payload.get('error')}")
+            messages = payload.get("messages", [])
+
+            for msg in messages:
+                if msg.get("thread_ts"):
+                    continue  # replies live under their parent, fetched once
+                results.append(_slack_message_doc(msg, channel_name, team_domain, channel_id, users, "message"))
+                if msg.get("reply_count"):
+                    rresp = await client.get(
+                        f"{base}/conversations.replies",
+                        params={"channel": channel_id, "ts": msg["ts"]},
+                    )
+                    rpayload = rresp.json()
+                    if not rpayload.get("ok"):
+                        continue  # partial data beats a failed run
+                    for reply in rpayload.get("messages", []):
+                        if reply["ts"] == msg.get("ts"):
+                            continue  # the parent is already indexed
+                        results.append(_slack_message_doc(reply, channel_name, team_domain, channel_id, users, "reply"))
+
+            cursor = (payload.get("response_metadata") or {}).get("next_cursor")
+            if not messages or not cursor:
+                break
+
+    return results[:300]
+
+
+def _slack_message_doc(msg: dict, channel_name: str, team_domain: str, channel_id: str,
+                       users: dict[str, str], data_type: str) -> dict:
+    from datetime import datetime as _dt
+
+    ts = msg.get("ts", "")
+    author = msg.get("user", "")
+    author = users.get(author, author) or msg.get("username", "bot")
+    text = _strip_mrkdwn(msg.get("text", ""), users)
+    permalink = f"https://{team_domain}.slack.com/archives/{channel_id}/{ts}"
+
+    parts = []
+    if text:
+        parts.append(text)
+    ts_human = _dt.fromtimestamp(float(ts)).strftime("%Y-%m-%d %H:%M UTC") if ts else ""
+    if ts_human:
+        parts.append(ts_human)
+
+    return {
+        "content": "\n".join(parts),
+        "metadata": {
+            "source": "slack",
+            "title": f"{author} in #{channel_name}",
+            "author": author,
+            "channel": channel_name,
+            "channel_id": channel_id,
+            "data_type": data_type,
+            "ts": ts,
+            "url": permalink,
+        },
+    }
 
 
 def make_inventory_tool(workspace_id: str, chroma_client, allowed_sources: list[str] | None = None):

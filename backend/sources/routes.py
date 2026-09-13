@@ -90,6 +90,21 @@ class JiraSourceIn(BaseModel):
         return v
 
 
+class SlackSourceIn(BaseModel):
+    type: Literal["slack"]
+    token: str = Field(..., min_length=1)
+    channel: str = Field(..., min_length=1)
+    label: str = ""
+
+    @field_validator("channel")
+    @classmethod
+    def _clean_channel(cls, v: str) -> str:
+        v = v.strip().lower().lstrip("#").strip()
+        if not v:
+            raise ValueError("Enter a channel name, like general")
+        return v
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 async def _verify_confluence(body) -> None:
@@ -213,6 +228,107 @@ async def _verify_jira(body) -> None:
             )
 
 
+async def _verify_slack(body) -> dict:
+    """
+    Confirm the bot token works, the team answers, and the bot can see the
+    channel — before anything is stored. Returns what the source needs to read:
+    the team domain (for permalinks), the channel id, and its canonical name.
+    """
+    import httpx as _httpx
+
+    headers = {"Authorization": f"Bearer {body.token}", "Content-Type": "application/json"}
+
+    async with _httpx.AsyncClient(headers=headers, timeout=15) as c:
+        try:
+            r = await c.get("https://slack.com/api/auth.test")
+        except Exception as exc:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                f"Couldn't reach Slack. ({exc.__class__.__name__})",
+            )
+
+        auth = r.json()
+        if not auth.get("ok"):
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                f"Slack rejected that token ({auth.get('error')}). The token is a "
+                "bot token (xoxb-…) from api.slack.com/apps → your app → OAuth & "
+                "Permissions — reinstall the app if it was rotated.",
+            )
+
+        team_domain = auth.get("url", "").replace("https://", "").rstrip("/").split(".")[0]
+        if not team_domain:
+            team_domain = auth.get("team", "slack")
+
+        channel = await _slack_find_channel(c, body.channel)
+
+        # Public channels the app is not in still show in the list; history
+        # would fail on them, so say so before anything is stored.
+        info = await c.get(
+            "https://slack.com/api/conversations.info",
+            params={"channel": channel["id"]},
+        )
+        info_payload = info.json()
+        if info_payload.get("ok") and not (info_payload.get("channel") or {}).get("is_member"):
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                f"The bot can see #{body.channel} but is not in it. Open the "
+                "channel → Details → Add apps → add this app, then re-save.",
+            )
+        if not info_payload.get("ok") and info_payload.get("error") == "not_in_channel":
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                f"The bot is not in #{body.channel}. Open the channel → Details → "
+                "Add apps → add this app, then re-save.",
+            )
+
+        return {"team_domain": team_domain, "channel_id": channel["id"],
+                "channel_name": channel.get("name", body.channel)}
+
+
+async def _slack_find_channel(client, name: str) -> dict:
+    """Resolve a channel name to its Slack object, listing what is visible on a miss."""
+    cursor = None
+    while True:
+        params = {**({"cursor": cursor} if cursor else {}),
+                  "types": "public_channel,private_channel",
+                  "exclude_archived": True, "limit": 200}
+        r = await client.get("https://slack.com/api/conversations.list", params=params)
+        payload = r.json()
+        if not payload.get("ok"):
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                f"Slack couldn't list channels: {payload.get('error')}",
+            )
+        for ch in payload.get("channels", []):
+            if ch.get("name") == name:
+                return ch
+        cursor = (payload.get("response_metadata") or {}).get("next_cursor")
+        if not cursor:
+            break
+
+    # Collect the names we did find so the owner can see what is actually there.
+    visible = set()
+    cursor = None
+    while True:
+        params = {**({"cursor": cursor} if cursor else {}),
+                  "types": "public_channel,private_channel",
+                  "exclude_archived": True, "limit": 200}
+        r = await client.get("https://slack.com/api/conversations.list", params=params)
+        payload = r.json()
+        if payload.get("ok"):
+            visible.update(ch.get("name", "") for ch in payload.get("channels", []))
+        cursor = (payload.get("response_metadata") or {}).get("next_cursor")
+        if not cursor:
+            break
+
+    raise HTTPException(
+        status.HTTP_422_UNPROCESSABLE_ENTITY,
+        f"No channel '#{name}' is visible to this bot. Channels it can see: "
+        f"{', '.join(sorted(visible)) or 'none'}",
+    )
+
+
 def _source_doc(workspace_id: str, source_type: str, label: str, config: dict, config_secret: dict | None = None) -> dict:
     now = datetime.now(timezone.utc)
     doc = {
@@ -242,7 +358,7 @@ async def add_source(
     # surfaces the first one's complaint ("Input should be 'github'"), which
     # tells the user nothing about what they actually got wrong.
     body: Annotated[
-        Union[GithubSourceIn, UrlSourceIn, ConfluenceSourceIn, JiraSourceIn],
+        Union[GithubSourceIn, UrlSourceIn, ConfluenceSourceIn, JiraSourceIn, SlackSourceIn],
         Field(discriminator="type"),
     ],
     user=Depends(get_current_user),
@@ -292,6 +408,17 @@ async def add_source(
         config = {"base_url": body.base_url, "project_key": project_key, "email": body.email}
         config_secret = {"api_token": body.api_token}
         doc = _source_doc(ws["_id"], "jira", label, config, config_secret)
+
+    elif body.type == "slack":
+        info = await _verify_slack(body)
+        label = body.label or f"Slack: #{info['channel_name']}"
+        config = {
+            "channel_id": info["channel_id"],
+            "channel_name": info["channel_name"],
+            "team_domain": info["team_domain"],
+        }
+        config_secret = {"token": body.token}
+        doc = _source_doc(ws["_id"], "slack", label, config, config_secret)
 
     await db.sources.insert_one(doc)
     return {"source": serialize_source(doc)}

@@ -7,6 +7,7 @@ import {
   FolderGit2,
   Globe,
   Loader2,
+  MessageSquare,
   Plus,
   RefreshCw,
   ShieldCheck,
@@ -47,6 +48,7 @@ const TYPE_ICON: Record<string, React.ReactNode> = {
   file:       <Upload className="h-4 w-4 text-muted-foreground" />,
   confluence: <Globe className="h-4 w-4 text-muted-foreground" />,
   jira:       <CircleDot className="h-4 w-4 text-muted-foreground" />,
+  slack:      <MessageSquare className="h-4 w-4 text-muted-foreground" />,
 }
 
 // ── Source card ────────────────────────────────────────────────────────────────
@@ -119,7 +121,7 @@ function SourceCard({ source, canManage }: { source: Source; canManage: boolean 
 
 // ── Add-source panel ───────────────────────────────────────────────────────────
 
-type Tab = 'file' | 'url' | 'github' | 'confluence' | 'jira'
+type Tab = 'file' | 'url' | 'github' | 'confluence' | 'jira' | 'slack'
 
 /** Personal space keys are case-sensitive and start with ~; only shout the rest. */
 function normaliseSpaceKey(v: string): string {
@@ -159,6 +161,11 @@ function AddSourcePanel({ onClose }: { onClose: () => void }) {
   const [jira, setJira] = useState({ base_url: '', email: '', api_token: '', project_key: '' })
   const [jiraBusy, setJiraBusy] = useState(false)
   const [jiraErr, setJiraErr] = useState('')
+
+  // Slack
+  const [slack, setSlack] = useState({ token: '', channel: '' })
+  const [slackBusy, setSlackBusy] = useState(false)
+  const [slackErr, setSlackErr] = useState('')
 
   // GitHub
   const [pat, setPat] = useState('')
@@ -302,12 +309,36 @@ function AddSourcePanel({ onClose }: { onClose: () => void }) {
     setJira((c) => ({ ...c, [k]: value }))
   }
 
+  async function handleSlack(e: React.FormEvent) {
+    e.preventDefault()
+    setSlackErr('')
+    setSlackBusy(true)
+    try {
+      const channel = slack.channel.trim().toLowerCase().replace(/^#/, '')
+      const res = await addSource({
+        type: 'slack',
+        token: slack.token,
+        channel,
+        label: `Slack: #${channel}`,
+      }).unwrap()
+      await triggerIngest(res.source.id).unwrap().catch(() => {})
+      onClose()
+    } catch (e: any) {
+      setSlackErr(errorMessage(e))
+    } finally { setSlackBusy(false) }
+  }
+
+  const setSlackField = (k: keyof typeof slack) => (e: React.ChangeEvent<HTMLInputElement>) => {
+    setSlack((c) => ({ ...c, [k]: e.target.value }))
+  }
+
   const TABS: { id: Tab; label: string }[] = [
     { id: 'file', label: 'File Upload' },
     { id: 'url', label: 'URL' },
     { id: 'github', label: 'GitHub' },
     { id: 'confluence', label: 'Confluence' },
     { id: 'jira', label: 'Jira' },
+    { id: 'slack', label: 'Slack' },
   ]
 
   return (
@@ -621,6 +652,65 @@ function AddSourcePanel({ onClose }: { onClose: () => void }) {
           <Button type="submit" size="sm"
             disabled={jiraBusy || !jira.base_url || !jira.email || !jira.api_token || !jira.project_key}>
             {jiraBusy ? <><Loader2 className="h-4 w-4 animate-spin mr-1" /> Connecting…</> : 'Connect project'}
+          </Button>
+        </form>
+      )}
+
+      {/* ── Slack tab ──
+          The cleanest consent story of any connector: adding the bot to a
+          channel IS the grant, removing it IS the revocation. The floor is the
+          one channel we read; the ceiling is every channel the app is in. */}
+      {tab === 'slack' && (
+        <form onSubmit={handleSlack} className="flex flex-col gap-3">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="flex flex-col gap-1.5 sm:col-span-2">
+              <label className="text-xs font-medium flex items-center gap-1">
+                Bot token
+                <FieldHelp text={
+                  '1. Open api.slack.com/apps → Create New App → From scratch\n' +
+                  '2. Under OAuth & Permissions add scope channels:history, channels:read, groups:history, users:read\n' +
+                  '3. Install to Workspace → copy the xoxb-… OAuth token'
+                } />
+              </label>
+              <Input type="password" placeholder="xoxb-…"
+                value={slack.token} onChange={setSlackField('token')} required disabled={slackBusy} />
+            </div>
+            <div className="flex flex-col gap-1.5 sm:col-span-2">
+              <label className="text-xs font-medium flex items-center gap-1">
+                Channel
+                <FieldHelp text="The channel to index, e.g. general. The bot must be added to it — open the channel → Details → Add apps." />
+              </label>
+              <Input placeholder="general"
+                value={slack.channel} onChange={setSlackField('channel')} required disabled={slackBusy} />
+            </div>
+          </div>
+
+          <div className="rounded-lg border bg-muted/30 p-3 text-xs leading-relaxed">
+            <p className="flex items-center gap-1.5 font-medium text-foreground">
+              <ShieldCheck className="h-3.5 w-3.5" /> What this grants
+            </p>
+            <ul className="mt-2 flex flex-col gap-1 text-muted-foreground">
+              <li>
+                <span className="text-foreground">Sensei reads:</span> #{slack.channel.trim().replace(/^#/, '') || 'channel'}{' '}
+                only. Nothing else is fetched or indexed.
+              </li>
+              <li>
+                <span className="text-foreground">The token could reach:</span> every channel
+                this Slack app has been added to — Slack cannot narrow a bot token
+                to one channel.
+              </li>
+              <li>
+                <span className="text-foreground">So:</span> add the bot to only the channels
+                this work involves. The invite is the grant; removing the app is
+                the revocation.
+              </li>
+            </ul>
+          </div>
+
+          {slackErr && <p className="text-xs text-destructive">{slackErr}</p>}
+          <Button type="submit" size="sm"
+            disabled={slackBusy || !slack.token || !slack.channel.trim()}>
+            {slackBusy ? <><Loader2 className="h-4 w-4 animate-spin mr-1" /> Connecting…</> : 'Connect channel'}
           </Button>
         </form>
       )}
