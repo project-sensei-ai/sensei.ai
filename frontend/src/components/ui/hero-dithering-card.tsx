@@ -78,10 +78,10 @@ export function CTASection({
             Your team context, indexed
           </div>
 
-          <h2 className="font-serif text-5xl md:text-7xl lg:text-8xl font-medium tracking-[-0.03em] text-foreground mb-8 leading-[1.02]">
-            Every decision, <br />
-            <span className="text-foreground/80">answered instantly.</span>
-          </h2>
+<h2 className="font-serif text-4xl md:text-6xl lg:text-6xl font-medium tracking-[-0.03em] text-foreground mb-8 leading-[1.05]">
+                Every decision, <br />
+                <span className="text-foreground/80">answered instantly.</span>
+              </h2>
 
           <p className="text-muted-foreground text-lg md:text-xl max-w-2xl mb-12 leading-relaxed">
             Sensei connects Confluence, GitHub, Jira and Slack, and answers
