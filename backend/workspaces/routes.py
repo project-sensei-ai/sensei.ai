@@ -293,3 +293,7 @@ async def remove_member(
     await db.members.delete_one({"_id": member["_id"]})
     await db.invites.delete_many({"workspace_id": workspace["_id"], "user_id": user_id,
                                   "accepted_at": None})
+    # Their brief goes too. Revoking access while leaving a document the agent
+    # wrote *about this project, for that person* in the owner's list and the
+    # activity feed is not revoking much.
+    await db.briefs.delete_many({"workspace_id": workspace["_id"], "user_id": user_id})

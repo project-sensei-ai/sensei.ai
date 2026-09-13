@@ -149,3 +149,79 @@ def test_a_member_joins_by_invitation_and_gets_less(browser):
 
     member_ctx.close()
     ctx.close()
+
+
+def test_a_new_owner_can_go_from_signup_to_a_first_answer(browser):
+    """
+    The path a reviewer is most likely to take first, and the one with the most
+    moving parts: choose a role, register, name a project, connect something,
+    wait for it to index, ask a question.
+    """
+    ctx = browser.new_context(viewport={"width": 1440, "height": 1000})
+    page = ctx.new_page()
+    email = f"e2e-owner-{uuid.uuid4().hex[:8]}@example.com"
+
+    page.goto(f"{BASE}/register")
+
+    # A role is chosen before any form appears.
+    expect(page.get_by_text("Which of these is you?")).to_be_visible(timeout=15000)
+    page.get_by_text("I'm setting up a project").click()
+
+    page.fill('input[type="text"]', "E2E Owner")
+    page.fill('input[type="email"]', email)
+    page.fill('input[type="password"]', "OwnerChosen!123")
+    page.get_by_role("button", name=re.compile("Create account|Sign up", re.I)).first.click()
+
+    # A new owner is taken to onboarding, not to an empty dashboard.
+    page.wait_for_url("**/onboarding", timeout=20000)
+
+    page.fill('input[placeholder*="Project Atlas"]', "E2E Test Project")
+    page.get_by_role("button", name=re.compile("Create workspace")).click()
+
+    # Step 2 — a public URL is the only source a test can add without a
+    # credential of someone's.
+    expect(page.get_by_role("button", name="URL")).to_be_visible(timeout=20000)
+    page.get_by_role("button", name="URL").click()
+    page.fill('textarea[placeholder*="docs.example.com"]', "https://example.com/")
+    page.get_by_role("button", name=re.compile("Add URLs")).click()
+
+    expect(page.get_by_text("1 source(s) added")).to_be_visible(timeout=30000)
+
+    # Step 3 — the review step is where indexing status is shown, and it polls
+    # until everything lands.
+    page.get_by_role("button", name=re.compile("Done adding sources")).click()
+    expect(page.get_by_text("Ready").first).to_be_visible(timeout=120000)
+
+    # Step 4 — the allowlist, which is the last thing onboarding asks for.
+    page.get_by_role("button", name=re.compile("Continue|Next|Invite", re.I)).first.click()
+    expect(page.get_by_text(re.compile("Who can ask the agent", re.I))).to_be_visible(timeout=20000)
+
+    # Finish, and the project is usable.
+    page.get_by_role("button", name=re.compile("Finish setup")).click()
+    page.wait_for_url("**/dashboard", timeout=20000)
+    expect(page.get_by_text("E2E Test Project")).to_be_visible(timeout=15000)
+
+    # Tidy up. A test that leaves a workspace behind every run turns the demo
+    # environment into a junk drawer, and the first person to notice is whoever
+    # is reviewing it.
+    page.evaluate("""async () => {
+        const r = await fetch('/api/sources', {credentials:'include'});
+        const d = await r.json();
+        for (const s of d.sources) {
+            await fetch('/api/sources/' + s.id, {method:'DELETE', credentials:'include'});
+        }
+    }""")
+
+    ctx.close()
+
+
+def test_a_member_cannot_register_themselves(browser):
+    """The owner's allowlist is the only way in, and the UI says so."""
+    ctx = browser.new_context(viewport={"width": 1440, "height": 1000})
+    page = ctx.new_page()
+    page.goto(f"{BASE}/register")
+    page.get_by_text("I'm joining a project").click()
+    expect(page.get_by_text(re.compile("Ask your project owner to add you", re.I))).to_be_visible()
+    # No form is offered at all — refusing at the API alone would be a worse UX.
+    assert page.locator('input[type="password"]').count() == 0
+    ctx.close()
