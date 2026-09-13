@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useGetMeQuery } from '@/services/authApi'
+import { BrandLogo } from '@/components/BrandLogo'
 import StepWorkspace from './onboarding/StepWorkspace'
 import StepSources from './onboarding/StepSources'
 import StepReview from './onboarding/StepReview'
@@ -26,10 +27,7 @@ export default function Onboarding() {
       {/* Header */}
       <header className="flex items-center justify-between px-6 py-4 border-b">
         <div className="flex items-center gap-2">
-          <div className="h-7 w-7 rounded-md bg-primary flex items-center justify-center text-primary-foreground text-sm font-bold select-none">
-            S
-          </div>
-          <span className="font-semibold text-sm">Sensei</span>
+          <BrandLogo className="h-9 w-auto" />
         </div>
         {user && (
           <span className="text-xs text-muted-foreground">

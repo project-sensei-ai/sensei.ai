@@ -6,6 +6,7 @@ import {
   useRegisterMutation,
 } from '../services/authApi'
 import GoogleButton from '../components/GoogleButton'
+import { BrandLogo } from '@/components/BrandLogo'
 import { Button } from '@/components/ui/button'
 import {
   Card,
@@ -130,6 +131,7 @@ export default function Register() {
     <div className="bg-background text-foreground flex min-h-svh flex-col items-center justify-center p-8">
       <div className="flex w-full max-w-sm flex-col gap-6">
         <div className="text-center">
+          <BrandLogo className="mx-auto mb-5 h-10 w-auto" />
           <h1 className="text-2xl font-bold tracking-tight">
             Create your account
           </h1>
