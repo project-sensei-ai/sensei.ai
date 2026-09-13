@@ -411,6 +411,9 @@ caller's `role` so the UI can hide owner-only controls.
 | DELETE | `/api/answers/{id}` | JWT + owner | Dismiss; not everything asked deserves documenting |
 | GET | `/api/activity` | JWT + member | What the agent did, and which of it was unprompted |
 | GET | `/api/trust` | JWT + member | Every grant, its real ceiling, and how to revoke it |
+| GET | `/api/watch` | JWT + member | Changes the agent judged worth reporting |
+| POST | `/api/watch/check` | JWT + owner | Re-read the sources now. Synchronous — "nothing changed" is a real answer and a background task that reports nothing looks like one that never ran |
+| POST | `/api/watch/{id}/ack` | JWT + owner | Dismiss a change notice |
 
 **Chat Sessions**
 
@@ -493,6 +496,11 @@ unanswered
 ├── workspace_id + question_key
 ├── times_asked     repeats bump a counter, not a new row
 └── status          (open | answered | dismissed)
+
+change_digests
+├── workspace_id + at
+├── headline · detail · affects[] · severity
+└── acknowledged
 
 research_cache
 ├── workspace_id    (unique)

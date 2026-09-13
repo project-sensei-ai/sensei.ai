@@ -11,6 +11,7 @@ import {
   useGetDigestsQuery,
   useGetMyBriefQuery,
   useGetMyWorkspaceQuery,
+  useGetLedgerQuery,
 } from '@/services/onboardingApi'
 import {
   errorMessage,
@@ -135,6 +136,7 @@ export default function Dashboard() {
   const [ackDigest] = useAckDigestMutation()
   const [checkResult, setCheckResult] = useState<string | null>(null)
   const digests = (digestData?.digests ?? []).filter((d) => !d.acknowledged)
+  const { data: ledger } = useGetLedgerQuery()
   const user = data?.user
   const workspace = wsData?.workspace
   const isOwner = workspace?.role !== 'member'
@@ -184,6 +186,35 @@ export default function Dashboard() {
             </CardHeader>
           </Card>
         </Link>
+      )}
+
+      {/* The number the product is judged on, rather than buried three screens
+          deep on the page that produces it. */}
+      {ledger?.stats && ledger.stats.answers_given > 0 && (
+        <Card>
+          <CardContent className="flex flex-wrap gap-x-10 gap-y-4 pt-6">
+            <div>
+              <p className="text-2xl font-semibold tabular-nums">
+                {ledger.stats.without_a_human_pct}%
+              </p>
+              <p className="text-xs text-muted-foreground">answered without a human</p>
+            </div>
+            <div>
+              <p className="text-2xl font-semibold tabular-nums">{ledger.stats.answers_given}</p>
+              <p className="text-xs text-muted-foreground">questions handled</p>
+            </div>
+            <div>
+              <Link to="/answers" className="group">
+                <p className="text-2xl font-semibold tabular-nums group-hover:underline">
+                  {ledger.stats.open}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  waiting on a person
+                </p>
+              </Link>
+            </div>
+          </CardContent>
+        </Card>
       )}
 
       <div className="grid gap-4 sm:grid-cols-2">

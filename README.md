@@ -29,6 +29,7 @@ Built on the [Strands Agents SDK](https://strandsagents.com/).
 | **Onboarding brief** | An owner adds someone. Nobody asks for anything. A Strands `Graph` of three agents researches the project *for that person* and writes a typed brief — what this is, who owns what, what to read first, and an honest list of what the sources cannot tell them. It is waiting when they first log in. |
 | **Gap hunter** | When a source lands, the agent audits its own knowledge for what is *absent*: documents that should exist, components with no owner, references that go nowhere. For gaps the sources can actually support, it offers to write the document — and flags every line it inferred rather than found. |
 | **Answer ledger** | A question it could not ground is recorded rather than discarded. An owner answers once, it is indexed, and the agent answers it for everyone from then on. The project gets documented by being used. |
+| **Change watch** | It re-reads the connected sources, diffs them, and decides whether anything *material* moved. A typo: silence. A runbook deleted: a digest, and every brief written against the old state is marked stale. Most checks cost nothing — the diff runs before any model does. |
 
 ### Work you ask for
 
@@ -107,7 +108,10 @@ deployment is one container and one URL — no CORS, no second service.
 ### Tests
 
 ```bash
-cd backend && python -m pytest tests/ -q      # 27 tests, no model calls, ~0.4s
+cd backend && python -m pytest -q            # 33 tests, no model calls, ~0.4s
+
+# browser journeys, against a running server
+E2E_OWNER_PASSWORD=... python -m pytest tests/e2e -q
 ```
 
 ---
@@ -126,9 +130,16 @@ for "what does X say", `list_project_knowledge` for "is there a doc about X" —
 a question about the shelf, not the books. Answers cite their sources, and the
 agent says so plainly when the project does not cover something.
 
-**Background work.** Briefs and audits run as background tasks. Research is
-cached per project and composed per person, so adding five teammates researches
-once rather than five times.
+**Background work.** Briefs, audits and change checks run as background tasks.
+Research is cached per project and composed per person, so adding five teammates
+researches once rather than five times.
+
+**Staying quiet.** Two features exist mainly to decide *not* to speak. The change
+watcher hashes documents and diffs them before any model is called, so an
+unchanged project costs nothing. And when the agent reads a team channel, it
+answers only when it could cite a source — measured on this project, similarity
+scores do not separate "documented" from "not", but whether it can produce a
+citation does.
 
 **Model backends.** One flag. `LLM_BACKEND=bedrock | groq | ollama`. Background
 agents run a smaller model than interactive chat.
@@ -153,15 +164,16 @@ Members never see the onboarding wizard; it is an owner's tool.
 
 ```
 backend/
-├── agent/          brief.py · gaps.py · tools.py · ingest.py · agent.py · usage.py
+├── agent/          brief.py · gaps.py · watch.py · tools.py · ingest.py · agent.py
 ├── answers/        the answer ledger
+├── watch/          change digests
 ├── channels/       channel abstraction + when to speak unbidden
 ├── trust/          what the agent can reach and how to revoke it
 ├── activity/       what it did, and which of it was unprompted
 ├── auth/ workspaces/ sources/ ingest/ chat/ briefs/ gaps/
-├── core/           config · security · secrets · mailer
+├── core/           config · security · secrets · mailer · errors
 ├── db/             membership.py is the single access rule
-└── tests/          27 tests
+└── tests/          33 unit tests + 7 browser journeys
 frontend/src/pages/ Dashboard · Brief · Gaps · Answers · Trust · Chat · Sources
 ```
 
