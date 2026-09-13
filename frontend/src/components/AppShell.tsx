@@ -3,7 +3,6 @@ import { NavLink, useNavigate } from 'react-router-dom'
 import { useDispatch } from 'react-redux'
 import {
   ChevronsUpDown,
-  Database,
   FolderGit2,
   KeyRound,
   LayoutDashboard,
@@ -11,6 +10,7 @@ import {
   MessageSquare,
   Moon,
   Sun,
+  Sparkles,
 } from 'lucide-react'
 
 import { api } from '@/services/api'
@@ -54,8 +54,8 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 
 const navMain = [
   { title: 'Dashboard', icon: LayoutDashboard, to: '/dashboard' },
+  { title: 'Your brief', icon: Sparkles, to: '/brief' },
   { title: 'Sources', icon: FolderGit2, to: '/sources' },
-  { title: 'Memory', icon: Database, to: '/memory' },
   { title: 'Chat', icon: MessageSquare, to: '/chat' },
 ]
 

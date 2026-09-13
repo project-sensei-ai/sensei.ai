@@ -57,6 +57,31 @@ export interface Member {
   invite_url?: string
 }
 
+export interface BriefSection { heading: string; body: string; sources: string[] }
+export interface ReadingItem { title: string; source: string; why: string }
+export interface PersonToMeet { name: string; why: string }
+
+export interface BriefBody {
+  headline: string
+  sections: BriefSection[]
+  reading_list: ReadingItem[]
+  people_to_meet: PersonToMeet[]
+  open_questions: string[]
+}
+
+export interface Brief {
+  id: string
+  workspace_id: string
+  user_id: string
+  person_name: string | null
+  person_email: string | null
+  status: 'generating' | 'ready' | 'error'
+  brief: BriefBody | null
+  error_message: string | null
+  created_at: string | null
+  updated_at: string | null
+}
+
 export interface AddMemberResult {
   email: string
   status: 'invited' | 'skipped'
@@ -156,6 +181,25 @@ const onboardingApi = api.injectEndpoints({
       invalidatesTags: ['Member'],
     }),
 
+    getMyBrief: builder.query<{ brief: Brief | null }, void>({
+      // Poll while the agent is still researching.
+      query: () => '/briefs/me',
+      providesTags: ['Brief'],
+    }),
+
+    getBriefs: builder.query<{ briefs: Brief[] }, void>({
+      query: () => '/briefs',
+      providesTags: ['Brief'],
+    }),
+
+    regenerateBrief: builder.mutation<{ message: string; user_id: string }, string | void>({
+      query: (userId) => ({
+        url: `/briefs/regenerate${userId ? `?user_id=${userId}` : ''}`,
+        method: 'POST',
+      }),
+      invalidatesTags: ['Brief'],
+    }),
+
     removeMember: builder.mutation<void, string>({
       query: (userId) => ({ url: `/workspaces/members/${userId}`, method: 'DELETE' }),
       invalidatesTags: ['Member'],
@@ -221,6 +265,9 @@ export const {
   useGetMembersQuery,
   useAddMembersMutation,
   useRemoveMemberMutation,
+  useGetMyBriefQuery,
+  useGetBriefsQuery,
+  useRegenerateBriefMutation,
   useJoinWorkspaceMutation,
   useDeleteSourceMutation,
   useListChatSessionsQuery,

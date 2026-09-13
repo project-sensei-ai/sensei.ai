@@ -1,9 +1,9 @@
 import { useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
-import { KeyRound, MessageSquare, Database, Users, X } from 'lucide-react'
+import { KeyRound, MessageSquare, Database, Sparkles, Users, X, Loader2 } from 'lucide-react'
 import { AppShell } from '@/components/AppShell'
 import TeamPanel from '@/components/TeamPanel'
-import { useGetMyWorkspaceQuery } from '@/services/onboardingApi'
+import { useGetMyBriefQuery, useGetMyWorkspaceQuery } from '@/services/onboardingApi'
 import {
   errorMessage,
   useGetMeQuery,
@@ -118,6 +118,8 @@ function SetPasswordBanner() {
 export default function Dashboard() {
   const { data } = useGetMeQuery()
   const { data: wsData } = useGetMyWorkspaceQuery()
+  const { data: briefData } = useGetMyBriefQuery(undefined, { pollingInterval: 10000 })
+  const briefRecord = briefData?.brief
   const user = data?.user
   const workspace = wsData?.workspace
   const isOwner = workspace?.role !== 'member'
@@ -138,6 +140,36 @@ export default function Dashboard() {
             : "Here's your project context at a glance."}
         </p>
       </div>
+
+      {/* The agent's unprompted work, surfaced first — it happened before this
+          person ever signed in. */}
+      {briefRecord && (
+        <Link to="/brief" className="group">
+          <Card className="border-primary/30 bg-primary/[0.03] transition-colors group-hover:border-primary/50">
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                {briefRecord.status === 'generating'
+                  ? <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                  : <Sparkles className="h-4 w-4 text-primary" />}
+                <CardTitle className="text-base">
+                  {briefRecord.status === 'generating'
+                    ? 'The agent is reading your project'
+                    : briefRecord.status === 'error'
+                    ? "Your brief couldn't be written"
+                    : 'Your onboarding brief is ready'}
+                </CardTitle>
+              </div>
+              <CardDescription>
+                {briefRecord.status === 'generating'
+                  ? "Nobody asked it to — it started when you were added. A few minutes."
+                  : briefRecord.status === 'error'
+                  ? briefRecord.error_message
+                  : briefRecord.brief?.headline}
+              </CardDescription>
+            </CardHeader>
+          </Card>
+        </Link>
+      )}
 
       <div className="grid gap-4 sm:grid-cols-2">
         {overviewCards.map((card) => (

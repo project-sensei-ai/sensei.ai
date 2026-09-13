@@ -286,5 +286,13 @@ async def accept_invite(body: AcceptInviteIn, response: Response, db=Depends(get
 
     await db.invites.update_one({"_id": invite["_id"]}, {"$set": {"accepted_at": now}})
 
+    # The brief was written before this person had a name — the owner only had
+    # their email. Now that they have chosen one, address it to them.
+    if body.name and body.name.strip():
+        await db.briefs.update_one(
+            {"workspace_id": invite["workspace_id"], "user_id": user["_id"]},
+            {"$set": {"person_name": body.name.strip()}},
+        )
+
     _set_session_cookie(response, create_jwt(user["_id"], user["email"]))
     return {"user": serialize_user({**user, **updates})}

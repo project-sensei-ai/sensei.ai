@@ -9,18 +9,11 @@ import Onboarding from './pages/Onboarding'
 import Sources from './pages/Sources'
 import Join from './pages/Join'
 import PendingAccess from './pages/PendingAccess'
+import Brief from './pages/Brief'
 import ProtectedRoute from './components/ProtectedRoute'
 import OnboardingRoute from './components/OnboardingRoute'
 
 const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined
-
-function StubPage({ title }: { title: string }) {
-  return (
-    <div className="flex items-center justify-center min-h-svh text-muted-foreground text-sm">
-      {title} — coming soon
-    </div>
-  )
-}
 
 function Router() {
   return (
@@ -64,18 +57,18 @@ function Router() {
           }
         />
         <Route
-          path="/sources"
+          path="/brief"
           element={
             <ProtectedRoute>
-              <Sources />
+              <Brief />
             </ProtectedRoute>
           }
         />
         <Route
-          path="/memory"
+          path="/sources"
           element={
             <ProtectedRoute>
-              <StubPage title="Memory" />
+              <Sources />
             </ProtectedRoute>
           }
         />
