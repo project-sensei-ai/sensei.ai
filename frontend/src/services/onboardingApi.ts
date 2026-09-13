@@ -19,7 +19,7 @@ export interface SourceStats {
   pages_crawled?: number
 }
 
-export type SourceType = 'github' | 'file' | 'url' | 'confluence'
+export type SourceType = 'github' | 'file' | 'url' | 'confluence' | 'jira' | 'meeting'
 export type SourceStatus = 'pending' | 'indexing' | 'ready' | 'error'
 
 export interface Source {
@@ -157,6 +157,7 @@ export interface Grant {
 export interface TrustOverview {
   workspace: { name: string; role: WorkspaceRole }
   grants: Grant[]
+  tools: ToolGrant[]
   people: {
     name: string | null
     email: string | null
@@ -167,6 +168,8 @@ export interface TrustOverview {
   }[]
   coverage: {
     sources: number
+    tools: number
+    write_enabled: number
     indexed_chunks: number
     people_with_access: number
     pending_invites: number
@@ -214,6 +217,96 @@ export interface AddMemberResult {
   invite_url?: string
 }
 
+export interface ToolSpec {
+  name: string
+  server_name: string
+  description: string
+  access: 'read' | 'write'
+}
+
+export type GrantKind = 'mcp_http' | 'mcp_sse' | 'mcp_stdio'
+
+export interface ToolGrant {
+  id: string
+  workspace_id: string
+  name: string
+  kind: GrantKind
+  url: string | null
+  command: string | null
+  args: string[]
+  allow_write: boolean
+  disabled_tools: string[]
+  tools: ToolSpec[]
+  read_count: number
+  write_count: number
+  status: 'connected' | 'error' | 'disabled'
+  error_message: string | null
+  created_at: string | null
+  last_used_at: string | null
+  uses: number
+  credential_state?: 'encrypted' | 'plaintext' | 'none'
+  has_credential?: boolean
+}
+
+export interface ConnectToolInput {
+  name: string
+  kind: GrantKind
+  url?: string
+  authorization?: string
+  headers?: Record<string, string>
+  command?: string
+  args?: string[]
+  env?: Record<string, string>
+  allow_write?: boolean
+}
+
+export interface Artifact {
+  id: string
+  title: string
+  filename: string
+  kind: 'spreadsheet' | 'document' | string
+  mime: string
+  size: number
+  summary: string | null
+  created_at: string | null
+  url: string
+}
+
+export interface MeetingUtterance {
+  speaker: string
+  text: string
+  at: string
+}
+
+export interface MeetingReply {
+  id: string
+  at: string
+  kind: 'answer' | 'correction' | 'silent'
+  trigger: string
+  text: string
+  citations: ChatCitation[]
+  confidence: number
+  reason: string
+}
+
+export interface Meeting {
+  id: string
+  workspace_id: string
+  title: string
+  status: 'live' | 'ended'
+  mode: 'companion' | 'meet_bot'
+  meet_url?: string | null
+  bot_status?: string | null
+  started_at: string | null
+  ended_at: string | null
+  utterance_count: number
+  reply_count: number
+  transcript?: MeetingUtterance[]
+  replies?: MeetingReply[]
+  summary?: string | null
+  source_id?: string | null
+}
+
 export interface ChatCitation {
   index: number
   source_label: string
@@ -230,6 +323,8 @@ export interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
   citations?: ChatCitation[]
+  artifacts?: Artifact[]
+  tools_used?: string[]
   created_at: string
 }
 
@@ -252,6 +347,7 @@ export type AddSourceInput =
   | { type: 'github'; pat: string; repo: string; label?: string }
   | { type: 'url'; urls: string[]; label?: string }
   | { type: 'confluence'; base_url: string; email: string; api_token: string; space_key: string; label?: string }
+  | { type: 'jira'; base_url: string; email: string; api_token: string; project_key: string; label?: string }
 
 // ── Injected endpoints ────────────────────────────────────────────────────────
 
@@ -420,6 +516,63 @@ const onboardingApi = api.injectEndpoints({
       invalidatesTags: ['Source'],
     }),
 
+    // ── Tool grants ────────────────────────────────────────────────────────────
+
+    getTools: builder.query<{ grants: ToolGrant[]; can_manage: boolean }, void>({
+      query: () => '/tools',
+      providesTags: ['Tool'],
+    }),
+
+    connectTool: builder.mutation<{ grant: ToolGrant }, ConnectToolInput>({
+      query: (body) => ({ url: '/tools', method: 'POST', body }),
+      invalidatesTags: ['Tool', 'Trust'],
+    }),
+
+    updateTool: builder.mutation<
+      { grant: ToolGrant },
+      { id: string; allow_write?: boolean; disabled_tools?: string[]; name?: string }
+    >({
+      query: ({ id, ...body }) => ({ url: `/tools/${id}`, method: 'PATCH', body }),
+      invalidatesTags: ['Tool', 'Trust'],
+    }),
+
+    testTool: builder.mutation<{ grant: ToolGrant }, string>({
+      query: (id) => ({ url: `/tools/${id}/test`, method: 'POST' }),
+      invalidatesTags: ['Tool', 'Trust'],
+    }),
+
+    revokeTool: builder.mutation<void, string>({
+      query: (id) => ({ url: `/tools/${id}`, method: 'DELETE' }),
+      invalidatesTags: ['Tool', 'Trust'],
+    }),
+
+    getArtifacts: builder.query<{ artifacts: Artifact[] }, void>({
+      query: () => '/artifacts',
+      providesTags: ['Artifact'],
+    }),
+
+    // ── Meetings ───────────────────────────────────────────────────────────────
+
+    listMeetings: builder.query<{ meetings: Meeting[] }, void>({
+      query: () => '/meetings',
+      providesTags: ['Meeting'],
+    }),
+
+    getMeeting: builder.query<{ meeting: Meeting }, string>({
+      query: (id) => `/meetings/${id}`,
+      providesTags: (_r, _e, id) => [{ type: 'Meeting', id }],
+    }),
+
+    startMeeting: builder.mutation<{ meeting: Meeting }, { title: string; mode?: 'companion' | 'meet_bot'; meet_url?: string }>({
+      query: (body) => ({ url: '/meetings', method: 'POST', body }),
+      invalidatesTags: ['Meeting'],
+    }),
+
+    endMeeting: builder.mutation<{ meeting: Meeting }, string>({
+      query: (id) => ({ url: `/meetings/${id}/end`, method: 'POST' }),
+      invalidatesTags: (_r, _e, id) => ['Meeting', { type: 'Meeting', id }, 'Source', 'Activity'],
+    }),
+
     // ── Chat sessions ──────────────────────────────────────────────────────────
 
     listChatSessions: builder.query<{ sessions: ChatSession[] }, void>({
@@ -490,4 +643,14 @@ export const {
   useGetChatSessionQuery,
   useArchiveChatSessionMutation,
   useSendMessageMutation,
+  useGetToolsQuery,
+  useConnectToolMutation,
+  useUpdateToolMutation,
+  useTestToolMutation,
+  useRevokeToolMutation,
+  useGetArtifactsQuery,
+  useListMeetingsQuery,
+  useGetMeetingQuery,
+  useStartMeetingMutation,
+  useEndMeetingMutation,
 } = onboardingApi

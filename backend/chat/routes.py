@@ -1,4 +1,4 @@
-"""Chat routes — session management + Strands Agent cited Q&A."""
+"""Chat routes — session management + the colleague answering, streamed."""
 import asyncio
 import json
 from datetime import datetime, timezone
@@ -8,20 +8,22 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from agent.agent import build_agent, make_session_manager
+from agent.agent import build_colleague, make_session_manager
 from answers import store as answer_store
+from artifacts.routes import serialize_artifact
 from auth.deps import get_current_user
 from core.errors import humanise
 from db.chroma import get_chroma
 from db.database import get_db
 from db.membership import require_workspace, visible_sources
 from db.models import serialize_chat_session
+from toolgrants import registry as grants
 
 router = APIRouter(tags=["chat"])
 
 
 class ChatRequest(BaseModel):
-    question: str = Field(..., min_length=1, max_length=2000)
+    question: str = Field(..., min_length=1, max_length=4000)
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -31,6 +33,63 @@ async def _require_session(session_id: str, user, db):
     if not session:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Session not found")
     return session
+
+
+async def _equip(db, chroma, session: dict, user: dict, session_id: str, question: str = ""):
+    """
+    Everything one turn needs, resolved before the model runs: which sources
+    this person may be answered from, which tools the owner granted, and which
+    Atlassian credential (if any) makes Jira live.
+    """
+    ws = session["workspace_id"]
+    allowed = await visible_sources(db, ws, user["id"])
+    sources = [s async for s in db.sources.find({"workspace_id": ws})]
+    grant_docs = await grants.load_grants(db, ws)
+    col = await asyncio.to_thread(
+        build_colleague,
+        ws, chroma,
+        sources=sources, grants=grant_docs, user_id=user["id"],
+        session_manager=make_session_manager(session_id), allowed_sources=allowed,
+        question=question,
+    )
+    return col
+
+
+async def _persist_turn(db, session: dict, session_id: str, question: str, answer: str,
+                        citations: list, artifacts: list, user: dict, tools_used: list[str]) -> list[dict]:
+    """Store the exchange, the files it produced, and — if it went unanswered — the question."""
+    now = datetime.now(timezone.utc).isoformat()
+    saved = []
+    for art in artifacts:
+        art = {**art, "session_id": session_id}
+        await db.artifacts.insert_one(art)
+        saved.append(serialize_artifact(art))
+
+    is_first = len(session.get("messages", [])) == 0
+    title_update = {"title": question[:60] + ("…" if len(question) > 60 else "")} if is_first else {}
+    await db.chat_sessions.update_one(
+        {"_id": session_id},
+        {
+            "$set": {"updated_at": datetime.now(timezone.utc), **title_update},
+            "$push": {"messages": {"$each": [
+                {"role": "user", "content": question, "created_at": now},
+                {"role": "assistant", "content": answer, "citations": citations,
+                 "artifacts": saved, "tools_used": tools_used, "created_at": now},
+            ]}},
+        },
+    )
+    for name in tools_used:
+        await grants.touch(db, session["workspace_id"], name)
+
+    # An uncited answer is an ungrounded one — unless the turn was *work*
+    # (a file, a live lookup, a tool action), where citations are beside the point.
+    did_work = bool(artifacts) or any(
+        n in ("jira_search", "jira_issue") or "_" in n and not n.startswith(("search_", "list_", "who_"))
+        for n in tools_used
+    )
+    if not did_work and answer_store.is_worth_recording(question, answer, citations):
+        await answer_store.record(db, session["workspace_id"], question, user, session_id)
+    return saved
 
 
 # ── Session endpoints ──────────────────────────────────────────────────────────
@@ -88,43 +147,24 @@ async def send_message(
     user=Depends(get_current_user),
     db=Depends(get_db),
 ):
+    """One-shot answer. The streaming route below is what the UI uses."""
     session = await _require_session(session_id, user, db)
-    chroma = get_chroma(request)
+    col = await _equip(db, get_chroma(request), session, user, session_id, body.question)
+    tools_used: list[str] = []
+    try:
+        # Strands Agent.__call__ is synchronous — run it in a thread pool
+        response = await asyncio.to_thread(col.agent, body.question)
+        answer = str(response)
+        for m in getattr(col.agent, "messages", []) or []:
+            for block in m.get("content", []) if isinstance(m, dict) else []:
+                if isinstance(block, dict) and "toolUse" in block:
+                    tools_used.append(block["toolUse"].get("name", ""))
+    finally:
+        col.close()
 
-    sm = make_session_manager(session_id)
-    allowed = await visible_sources(db, session["workspace_id"], user["id"])
-    agent, captured = build_agent(
-        session["workspace_id"], chroma, session_manager=sm, allowed_sources=allowed
-    )
-
-    # Strands Agent.__call__ is synchronous — run it in a thread pool
-    response = await asyncio.to_thread(agent, body.question)
-    answer = str(response)
-    citations = captured  # populated in-place by search_project_docs tool calls
-
-    now = datetime.now(timezone.utc).isoformat()
-    user_msg = {"role": "user", "content": body.question, "created_at": now}
-    ai_msg = {"role": "assistant", "content": answer, "citations": citations, "created_at": now}
-
-    is_first = len(session.get("messages", [])) == 0
-    title_update = {}
-    if is_first:
-        title_update = {"title": body.question[:60] + ("…" if len(body.question) > 60 else "")}
-
-    await db.chat_sessions.update_one(
-        {"_id": session_id},
-        {
-            "$set": {"updated_at": datetime.now(timezone.utc), **title_update},
-            "$push": {"messages": {"$each": [user_msg, ai_msg]}},
-        },
-    )
-
-    # An uncited answer is an ungrounded one. Record it rather than losing the
-    # one moment where we know exactly which missing knowledge cost someone time.
-    if answer_store.is_worth_recording(body.question, answer, citations):
-        await answer_store.record(db, session["workspace_id"], body.question, user, session_id)
-
-    return {"answer": answer, "citations": citations}
+    artifacts = await _persist_turn(db, session, session_id, body.question, answer,
+                                    col.citations, col.artifacts, user, tools_used)
+    return {"answer": answer, "citations": col.citations, "artifacts": artifacts}
 
 
 # ── Streaming ─────────────────────────────────────────────────────────────────
@@ -133,14 +173,6 @@ async def send_message(
 # up to forty seconds while the agent searches, reads and reasons. All of that
 # work is interesting — it is the evidence that there is an agent here at all —
 # and hiding it behind a spinner throws it away.
-
-# What each tool is doing, said the way a person would say it.
-TOOL_NARRATION = {
-    "search_project_docs": "Searching the project's documents",
-    "list_project_knowledge": "Taking stock of what's indexed",
-    "search_knowledge_base": "Searching uploaded files",
-}
-
 
 def _sse(event: dict) -> str:
     return f"data: {json.dumps(event)}\n\n"
@@ -156,35 +188,36 @@ async def stream_message(
 ):
     """
     Answer over server-sent events: tool calls as they happen, then the answer
-    token by token, then citations.
+    token by token, then citations and any files produced.
     """
     session = await _require_session(session_id, user, db)
     chroma = get_chroma(request)
 
-    # Resolved before the stream opens; an auth question should not be answered
-    # halfway through a response.
-    allowed = await visible_sources(db, session["workspace_id"], user["id"])
-
     async def events():
-        sm = make_session_manager(session_id)
-        agent, captured = build_agent(
-            session["workspace_id"], chroma, session_manager=sm, allowed_sources=allowed
-        )
         answer_parts: list[str] = []
         announced: set[str] = set()
-
+        tools_used: list[str] = []
+        col = None
         try:
-            async for chunk in agent.stream_async(body.question):
+            # Resolved before the stream opens; an auth question should not be
+            # answered halfway through a response.
+            col = await _equip(db, chroma, session, user, session_id, body.question)
+            for u in col.unavailable:
+                yield _sse({"type": "notice",
+                            "message": f"{u['grant']} is not answering right now, so its tools are unavailable this turn."})
+
+            async for chunk in col.agent.stream_async(body.question):
                 # A tool starting. Announced once per invocation, not once per
                 # streamed fragment of its arguments.
                 tool = chunk.get("current_tool_use")
                 if tool and tool.get("toolUseId") not in announced:
                     announced.add(tool["toolUseId"])
                     name = tool.get("name", "")
+                    tools_used.append(name)
                     yield _sse({
                         "type": "tool",
                         "name": name,
-                        "label": TOOL_NARRATION.get(name, f"Using {name}"),
+                        "label": col.narration.get(name, f"Using {name.replace('_', ' ')}"),
                     })
 
                 text = chunk.get("data")
@@ -193,35 +226,19 @@ async def stream_message(
                     yield _sse({"type": "text", "delta": text})
 
             answer = "".join(answer_parts)
-
-            now = datetime.now(timezone.utc).isoformat()
-            is_first = len(session.get("messages", [])) == 0
-            title_update = (
-                {"title": body.question[:60] + ("…" if len(body.question) > 60 else "")}
-                if is_first else {}
-            )
-            await db.chat_sessions.update_one(
-                {"_id": session_id},
-                {
-                    "$set": {"updated_at": datetime.now(timezone.utc), **title_update},
-                    "$push": {"messages": {"$each": [
-                        {"role": "user", "content": body.question, "created_at": now},
-                        {"role": "assistant", "content": answer,
-                         "citations": captured, "created_at": now},
-                    ]}},
-                },
-            )
-            if answer_store.is_worth_recording(body.question, answer, captured):
-                await answer_store.record(
-                    db, session["workspace_id"], body.question, user, session_id
-                )
-
-            yield _sse({"type": "done", "citations": captured})
+            col.close()
+            artifacts = await _persist_turn(db, session, session_id, body.question, answer,
+                                            col.citations, col.artifacts, user, tools_used)
+            yield _sse({"type": "done", "citations": col.citations, "artifacts": artifacts,
+                        "refusals": col.refusals})
 
         except Exception as exc:
             # The stream has already started, so an HTTP error code is no longer
             # available — the failure has to travel as an event.
             yield _sse({"type": "error", "message": humanise(exc)})
+        finally:
+            if col is not None:
+                col.close()
 
     return StreamingResponse(
         events(),

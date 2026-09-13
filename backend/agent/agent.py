@@ -1,44 +1,53 @@
+from dataclasses import dataclass, field
+
 from strands import Agent, ModelRetryStrategy
 
 from core.config import settings
 from .tools import make_inventory_tool, make_search_tool, search_knowledge_base
 
-SENSEI_SYSTEM_PROMPT = """You are Sensei, a permission-aware AI assistant embedded in a collaborative workspace.
+SENSEI_SYSTEM_PROMPT = """You are Sensei, a colleague on this project — not a chatbot. You were onboarded
+by the project owner, who gave you access to the project's sources and, sometimes,
+to tools. You think, look things up, do the work, and say plainly what you cannot do.
 
-You have access to a tool called `search_project_docs` that queries the workspace knowledge base — which contains indexed GitHub repositories, documentation, uploaded files, and other sources.
+## What you can reach
+- `search_project_docs` — the indexed sources (repos, wiki pages, files, tickets,
+  meeting notes). "What does the architecture say?" → search passages.
+- `list_project_knowledge` — the catalogue. "Is there a doc about X?" / "what do
+  you know?" → read the shelf, not the books.
+- `who_did_what` — a person's actual activity: commits, PRs, issues, tickets.
+  Use for "what has Priya been working on", "who touched the payments service".
+- `jira_search` / `jira_issue` — LIVE Jira. Ticket status is read now, never from
+  the index. Say "as of just now" when you report it. (Only present when Jira is
+  connected.)
+- `create_spreadsheet` / `write_document` — produce a file when someone asks for
+  a sheet, a table, a summary doc, a handover note. Gather facts first, then make
+  the file once.
+- Tools from connected services (GitHub, Slack, Gmail, calendars, internal APIs…)
+  appear with the service's name as a prefix, e.g. `github_list_issues`. Use them
+  like a colleague with an account would. If a tool call is refused because the
+  owner has not allowed writes, say exactly that — do not pretend you did it.
 
-## Choosing a tool
-Two different questions need two different tools:
-- "What does the architecture say?" → `search_project_docs`. Searching passages.
-- "Is there a doc about architecture?" / "what do you know about?" / "which
-  sources do you have?" → `list_project_knowledge`. Reading the catalogue.
-
-Asking search for a question about what exists will return passages from whatever
-happens to discuss the topic, and miss a document whose title is the answer.
-
-## Search budget
-Search **once**. Search a second time only if the first result genuinely missed the
-question, and a third only if that still left a real gap. Never repeat a search you
-have already run with different wording — if two searches did not surface it, the
-workspace does not contain it, and you should say so.
-
-## When to use the tool
-Call `search_project_docs` for ANY question that might be answered by workspace content:
-- Questions about the project, codebase, architecture, or team
-- Questions about commits, contributors, pull requests, or issues
-- Questions about documentation, processes, or decisions recorded in the sources
-- General "who / what / when / why" questions about the project
-
-Do NOT call the tool for general programming questions, definitions, or topics clearly unrelated to this workspace.
+## How to work
+- Decide which tool answers the question; do not search when the answer is live
+  (ticket status, open PRs) or about a person (use who_did_what).
+- Search **once**; a second time only if the first genuinely missed; never a third
+  with the same intent. If two searches found nothing, the project does not
+  contain it — say so and stop.
+- Chain tools toward the goal: look up, then act, then report. When asked to "do"
+  something, do it — a colleague asked for a spreadsheet produces a spreadsheet.
+- Never take a write action (create, send, update, delete) the person did not
+  clearly ask for. Read freely; write only on request.
 
 ## How to answer
-- After searching, synthesise the retrieved passages into a clear, direct answer.
-- Cite sources inline by their label: if a passage came from "my-repo", write
-  [my-repo] after the claim. Never emit numeric or dagger markers such as
-  【1†source】 or [1] — they render as noise and name nothing the reader can open.
-- If no relevant content is found, say so honestly — do not fabricate project details.
-- Keep answers concise; use markdown lists or code blocks where appropriate.
-- If the question is entirely general knowledge (no workspace angle), answer directly without calling the tool.
+- Direct and specific. Lead with the answer, then the evidence.
+- Cite sources inline by label: [my-repo], [Confluence: ENG], [Jira PROJ-412 live].
+  Never emit numeric or dagger markers such as 【1†source】 or [1].
+- If the sources do not cover it, say so honestly in one sentence. Do not
+  fabricate project details, ticket states, owners or decisions.
+- Say how fresh a fact is when it matters: "synced from Confluence", "live from
+  Jira just now".
+- Keep it concise; markdown lists or code blocks where they help.
+- A purely general question (no project angle) can be answered directly.
 """
 
 
@@ -69,7 +78,8 @@ def _build_model(background: bool = False):
         )
         # The session already carries the region; passing both is rejected.
         return BedrockModel(
-            model_id=settings.BEDROCK_MODEL_ID,
+            model_id=(settings.BEDROCK_BACKGROUND_MODEL_ID or settings.BEDROCK_MODEL_ID)
+            if background else settings.BEDROCK_MODEL_ID,
             boto_session=session,
         )
     if settings.LLM_BACKEND == "ollama":
@@ -90,6 +100,9 @@ def _build_model(background: bool = False):
         # "unrecoverable state due to max_tokens limit".
         params={"max_tokens": settings.MAX_OUTPUT_TOKENS},
     )
+
+
+_RETRY = ModelRetryStrategy(max_attempts=3, initial_delay=2, max_delay=8)
 
 
 def build_agent(workspace_id: str, chroma_client, session_manager=None,
@@ -120,13 +133,127 @@ def build_agent(workspace_id: str, chroma_client, session_manager=None,
         # question sleeps for ~2 minutes before surfacing anything. On a free-tier
         # key that reads as a hang. Fail fast instead: ~14s worst case, then a
         # real error the user can act on.
-        retry_strategy=ModelRetryStrategy(max_attempts=3, initial_delay=2, max_delay=8),
+        retry_strategy=_RETRY,
     )
     if session_manager is not None:
         agent_kwargs["session_manager"] = session_manager
 
     agent = Agent(**agent_kwargs)
     return agent, captured
+
+
+@dataclass
+class Colleague:
+    """
+    A fully equipped agent for one person's turn: the Strands Agent, plus the
+    side channels a turn fills in — citations, files produced, tool narration —
+    and the MCP sessions that must be closed when the turn ends.
+    """
+    agent: Agent
+    citations: list = field(default_factory=list)
+    artifacts: list = field(default_factory=list)
+    narration: dict = field(default_factory=dict)
+    refusals: list = field(default_factory=list)
+    unavailable: list = field(default_factory=list)
+    _grants: object = None
+
+    def close(self) -> None:
+        if self._grants is not None:
+            self._grants.close()
+            self._grants = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+
+
+BUILTIN_NARRATION = {
+    "search_project_docs": "Searching the project's documents",
+    "list_project_knowledge": "Taking stock of what's indexed",
+    "search_knowledge_base": "Searching uploaded files",
+    "who_did_what": "Reading the activity records",
+    "jira_search": "Checking Jira, live",
+    "jira_issue": "Opening the ticket in Jira, live",
+    "create_spreadsheet": "Building the spreadsheet",
+    "write_document": "Writing the document",
+    "recall_meetings": "Going back over the meeting notes",
+}
+
+
+def build_colleague(
+    workspace_id: str,
+    chroma_client,
+    *,
+    sources: list[dict],
+    grants: list[dict],
+    user_id: str,
+    session_manager=None,
+    allowed_sources: list[str] | None = None,
+    question: str = "",
+    max_grant_tools: int | None = None,
+) -> Colleague:
+    """
+    Everything the chat agent gets: the index tools, the live Jira tools when a
+    credential exists, the work tools, and every tool the owner granted through
+    an MCP connection — gated so writes are refused unless allowed.
+    """
+    from agent.jira import make_jira_tools
+    from agent.people import make_people_tool
+    from agent.work import make_work_tools
+    from toolgrants.registry import GrantSession, select_relevant
+
+    search_tool, captured = make_search_tool(workspace_id, chroma_client, allowed_sources=allowed_sources)
+    tools = [
+        search_tool,
+        make_inventory_tool(workspace_id, chroma_client, allowed_sources),
+        make_people_tool(workspace_id, chroma_client, allowed_sources),
+    ]
+    if settings.BEDROCK_KB_ID:
+        tools.append(search_knowledge_base)
+
+    # Jira rides on whatever Atlassian credential is already connected, but a
+    # member the owner has narrowed away from that source should not get it.
+    visible = [s for s in sources if allowed_sources is None or s["_id"] in allowed_sources]
+    tools.extend(make_jira_tools(visible))
+
+    work_tools, produced = make_work_tools(workspace_id, user_id)
+    tools.extend(work_tools)
+
+    narration = dict(BUILTIN_NARRATION)
+    hooks = []
+    grant_session = None
+    refusals: list = []
+    if grants:
+        grant_session = GrantSession().open(grants)
+        limit = max_grant_tools if max_grant_tools is not None else settings.MAX_GRANT_TOOLS_PER_TURN
+        tools.extend(select_relevant(grant_session.tools, question, limit))
+        narration.update(grant_session.narration)
+        gate = grant_session.gate(on_refusal=lambda name, g: refusals.append({"tool": name, "grant": g}))
+        hooks.append(gate)
+
+    kwargs = dict(
+        model=_build_model(),
+        tools=tools,
+        system_prompt=SENSEI_SYSTEM_PROMPT,
+        retry_strategy=_RETRY,
+    )
+    if hooks:
+        kwargs["hooks"] = hooks
+    if session_manager is not None:
+        kwargs["session_manager"] = session_manager
+
+    col = Colleague(
+        agent=Agent(**kwargs),
+        citations=captured,
+        artifacts=produced,
+        narration=narration,
+        refusals=refusals,
+        unavailable=grant_session.failed if grant_session else [],
+    )
+    col._grants = grant_session
+    return col
 
 
 def make_session_manager(session_id: str):

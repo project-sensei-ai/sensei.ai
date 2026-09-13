@@ -65,7 +65,54 @@ class ConfluenceSourceIn(BaseModel):
         return v
 
 
+class JiraSourceIn(BaseModel):
+    type: Literal["jira"]
+    base_url: str
+    email: str
+    api_token: str
+    project_key: str = Field(..., min_length=1, max_length=20)
+    label: str = ""
+
+    @field_validator("base_url")
+    @classmethod
+    def _site(cls, v: str) -> str:
+        v = v.strip().rstrip("/")
+        if not v.startswith(("http://", "https://")):
+            raise ValueError("Jira site must be a URL, like https://your-org.atlassian.net")
+        for marker in ("/wiki", "/jira", "/browse"):
+            idx = v.find(marker)
+            if idx != -1:
+                v = v[:idx]
+        return v
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
+async def _verify_jira(body) -> None:
+    """The project must exist and the token must open it — checked in the form."""
+    import base64 as _b64
+    import httpx as _httpx
+
+    auth = _b64.b64encode(f"{body.email}:{body.api_token}".encode()).decode()
+    headers = {"Authorization": f"Basic {auth}", "Accept": "application/json"}
+    key = body.project_key.strip().upper()
+    async with _httpx.AsyncClient(headers=headers, timeout=15, follow_redirects=True) as c:
+        try:
+            r = await c.get(f"{body.base_url}/rest/api/3/project/{key}")
+        except Exception as exc:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
+                                f"Couldn't reach {body.base_url} — check the site address. ({exc.__class__.__name__})")
+        if r.status_code in (401, 403):
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
+                                "Jira rejected those credentials. The email must be the Atlassian account that created the API token.")
+        if r.status_code == 404:
+            lst = await c.get(f"{body.base_url}/rest/api/3/project/search", params={"maxResults": 50})
+            keys = ", ".join(p.get("key", "") for p in (lst.json().get("values", []) if lst.status_code == 200 else []))
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
+                                f"No Jira project with key '{key}'. Projects this account can see: {keys or 'none'}")
+        if r.status_code != 200:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"Jira returned {r.status_code} for project {key}.")
+
 
 async def _verify_confluence(body) -> None:
     """
@@ -161,7 +208,7 @@ async def add_source(
     # surfaces the first one's complaint ("Input should be 'github'"), which
     # tells the user nothing about what they actually got wrong.
     body: Annotated[
-        Union[GithubSourceIn, UrlSourceIn, ConfluenceSourceIn],
+        Union[GithubSourceIn, UrlSourceIn, ConfluenceSourceIn, JiraSourceIn],
         Field(discriminator="type"),
     ],
     user=Depends(get_current_user),
@@ -203,6 +250,14 @@ async def add_source(
         config = {"base_url": body.base_url, "space_key": space_key, "email": body.email}
         config_secret = {"api_token": body.api_token}
         doc = _source_doc(ws["_id"], "confluence", label, config, config_secret)
+
+    elif body.type == "jira":
+        await _verify_jira(body)
+        key = body.project_key.strip().upper()
+        label = body.label or f"Jira: {key}"
+        config = {"base_url": body.base_url, "project_key": key, "email": body.email}
+        config_secret = {"api_token": body.api_token}
+        doc = _source_doc(ws["_id"], "jira", label, config, config_secret)
 
     await db.sources.insert_one(doc)
     return {"source": serialize_source(doc)}

@@ -13,6 +13,8 @@ import Brief from './pages/Brief'
 import Gaps from './pages/Gaps'
 import Answers from './pages/Answers'
 import Trust from './pages/Trust'
+import Tools from './pages/Tools'
+import Meetings from './pages/Meetings'
 import ProtectedRoute from './components/ProtectedRoute'
 import OnboardingRoute from './components/OnboardingRoute'
 
@@ -96,6 +98,22 @@ function Router() {
           element={
             <ProtectedRoute>
               <Sources />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/tools"
+          element={
+            <ProtectedRoute>
+              <Tools />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/meetings"
+          element={
+            <ProtectedRoute>
+              <Meetings />
             </ProtectedRoute>
           }
         />

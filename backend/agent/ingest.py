@@ -90,6 +90,24 @@ async def run_ingestion(db, chroma_client, source_id: str) -> None:
                 space_key=cfg["space_key"],
             )
 
+        elif source["type"] == "jira":
+            from agent.jira import fetch_jira
+            cfg = source["config"]
+            secret = secrets.decrypt_dict(source.get("config_secret"))
+            raw_docs = await fetch_jira(
+                base_url=cfg["base_url"], email=cfg["email"],
+                api_token=secret.get("api_token", ""), project_key=cfg["project_key"],
+            )
+
+        elif source["type"] == "meeting":
+            # Already text: the transcript was stored on the source when it was
+            # captured or uploaded. Nothing to fetch.
+            cfg = source["config"]
+            raw_docs = [{"content": cfg.get("transcript", ""),
+                         "metadata": {"source": "meeting", "data_type": "meeting",
+                                      "title": cfg.get("title", "Meeting"),
+                                      "held_at": cfg.get("held_at", "")}}]
+
         # Chunk and collect
         ids, documents, metadatas = [], [], []
         chunk_index = 0

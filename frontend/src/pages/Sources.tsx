@@ -44,6 +44,8 @@ const TYPE_ICON: Record<string, React.ReactNode> = {
   url:        <Globe className="h-4 w-4 text-muted-foreground" />,
   file:       <Upload className="h-4 w-4 text-muted-foreground" />,
   confluence: <Globe className="h-4 w-4 text-muted-foreground" />,
+  jira:       <Globe className="h-4 w-4 text-muted-foreground" />,
+  meeting:    <Globe className="h-4 w-4 text-muted-foreground" />,
 }
 
 // ── Source card ────────────────────────────────────────────────────────────────
@@ -116,7 +118,7 @@ function SourceCard({ source, canManage }: { source: Source; canManage: boolean 
 
 // ── Add-source panel ───────────────────────────────────────────────────────────
 
-type Tab = 'file' | 'url' | 'github' | 'confluence'
+type Tab = 'file' | 'url' | 'github' | 'confluence' | 'jira'
 
 /** Personal space keys are case-sensitive and start with ~; only shout the rest. */
 function normaliseSpaceKey(v: string): string {
@@ -151,6 +153,11 @@ function AddSourcePanel({ onClose }: { onClose: () => void }) {
   const [conf, setConf] = useState({ base_url: '', email: '', api_token: '', space_key: '' })
   const [confBusy, setConfBusy] = useState(false)
   const [confErr, setConfErr] = useState('')
+
+  // Jira — same Atlassian token as Confluence, a different endpoint.
+  const [jira, setJira] = useState({ base_url: '', email: '', api_token: '', project_key: '' })
+  const [jiraBusy, setJiraBusy] = useState(false)
+  const [jiraErr, setJiraErr] = useState('')
 
   // GitHub
   const [pat, setPat] = useState('')
@@ -252,6 +259,28 @@ function AddSourcePanel({ onClose }: { onClose: () => void }) {
     } finally { setConfBusy(false) }
   }
 
+  async function handleJira(e: React.FormEvent) {
+    e.preventDefault()
+    setJiraErr('')
+    setJiraBusy(true)
+    try {
+      const res = await addSource({
+        type: 'jira',
+        ...jira,
+        base_url: jira.base_url.trim().replace(/\/+$/, ''),
+        project_key: jira.project_key.trim().toUpperCase(),
+        label: `Jira: ${jira.project_key.trim().toUpperCase()}`,
+      }).unwrap()
+      await triggerIngest(res.source.id).unwrap().catch(() => {})
+      onClose()
+    } catch (e: any) {
+      setJiraErr(errorMessage(e))
+    } finally { setJiraBusy(false) }
+  }
+
+  const setJiraField = (k: keyof typeof jira) => (e: React.ChangeEvent<HTMLInputElement>) =>
+    setJira((j) => ({ ...j, [k]: e.target.value }))
+
   const setConfField = (k: keyof typeof conf) => (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value
     if (k === 'base_url') {
@@ -269,6 +298,7 @@ function AddSourcePanel({ onClose }: { onClose: () => void }) {
     { id: 'url', label: 'URL' },
     { id: 'github', label: 'GitHub' },
     { id: 'confluence', label: 'Confluence' },
+    { id: 'jira', label: 'Jira' },
   ]
 
   return (
@@ -473,6 +503,51 @@ function AddSourcePanel({ onClose }: { onClose: () => void }) {
           <Button type="submit" size="sm"
             disabled={confBusy || !conf.base_url || !conf.email || !conf.api_token || !conf.space_key}>
             {confBusy ? <><Loader2 className="h-4 w-4 animate-spin mr-1" /> Connecting…</> : 'Connect space'}
+          </Button>
+        </form>
+      )}
+
+      {/* ── Jira tab ──
+          Same site, same account, same token as Confluence. Indexing makes
+          tickets findable by topic; status is always read live. */}
+      {tab === 'jira' && (
+        <form onSubmit={handleJira} className="flex flex-col gap-3">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="flex flex-col gap-1.5 sm:col-span-2">
+              <label className="text-xs font-medium">Jira site</label>
+              <Input placeholder="https://your-org.atlassian.net"
+                value={jira.base_url} onChange={setJiraField('base_url')} required disabled={jiraBusy} />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-medium">Account email</label>
+              <Input type="email" placeholder="agent@your-org.com"
+                value={jira.email} onChange={setJiraField('email')} required disabled={jiraBusy} />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-medium">Project key</label>
+              <Input placeholder="PROJ" value={jira.project_key}
+                onChange={setJiraField('project_key')} required disabled={jiraBusy} />
+            </div>
+            <div className="flex flex-col gap-1.5 sm:col-span-2">
+              <label className="text-xs font-medium">API token</label>
+              <Input type="password" placeholder="Same token as Confluence works"
+                value={jira.api_token} onChange={setJiraField('api_token')} required disabled={jiraBusy} />
+            </div>
+          </div>
+          <div className="rounded-lg border bg-muted/30 p-3 text-xs leading-relaxed">
+            <p className="flex items-center gap-1.5 font-medium text-foreground">
+              <ShieldCheck className="h-3.5 w-3.5" /> What this grants
+            </p>
+            <ul className="mt-2 flex flex-col gap-1 text-muted-foreground">
+              <li><span className="text-foreground">Sensei reads:</span> issues in {jira.project_key.trim().toUpperCase() || 'PROJ'}, indexed for finding; status is looked up live so an answer is never a day old.</li>
+              <li><span className="text-foreground">The token could reach:</span> everything that account can see across Jira and Confluence.</li>
+              <li><span className="text-foreground">It cannot:</span> create, transition or comment on issues. Writes go through Tools, where you decide.</li>
+            </ul>
+          </div>
+          {jiraErr && <p className="text-xs text-destructive">{jiraErr}</p>}
+          <Button type="submit" size="sm"
+            disabled={jiraBusy || !jira.base_url || !jira.email || !jira.api_token || !jira.project_key}>
+            {jiraBusy ? <><Loader2 className="h-4 w-4 animate-spin mr-1" /> Connecting…</> : 'Connect project'}
           </Button>
         </form>
       )}

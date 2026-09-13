@@ -11,6 +11,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 
 from auth.routes import router as auth_router
 from activity.routes import router as activity_router
+from artifacts.routes import router as artifacts_router
 from answers.routes import router as answers_router
 from briefs.routes import router as briefs_router
 from gaps.routes import router as gaps_router
@@ -18,7 +19,9 @@ from chat.routes import router as chat_router
 from core.config import settings
 from db.database import ensure_indexes
 from ingest.routes import router as ingest_router
+from meetings.routes import router as meetings_router
 from sources.routes import router as sources_router
+from toolgrants.routes import router as tools_router
 from trust.routes import router as trust_router
 from watch.routes import router as watch_router
 from workspaces.routes import router as workspaces_router
@@ -129,6 +132,9 @@ app.include_router(activity_router, prefix=f"{API_PREFIX}/activity")
 app.include_router(answers_router, prefix=f"{API_PREFIX}/answers")
 app.include_router(trust_router, prefix=f"{API_PREFIX}/trust")
 app.include_router(watch_router, prefix=f"{API_PREFIX}/watch")
+app.include_router(tools_router, prefix=f"{API_PREFIX}/tools")
+app.include_router(artifacts_router, prefix=f"{API_PREFIX}/artifacts")
+app.include_router(meetings_router, prefix=f"{API_PREFIX}/meetings")
 
 
 def _health() -> dict:

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { Bot, ChevronDown, ChevronUp, MessageSquarePlus, Send, Trash2, User } from 'lucide-react'
+import { Bot, ChevronDown, ChevronUp, Download, FileSpreadsheet, FileText, MessageSquarePlus, Send, Trash2, User } from 'lucide-react'
 import { AppShell } from '@/components/AppShell'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/Spinner'
@@ -8,6 +8,7 @@ import {
   useCreateChatSessionMutation,
   useGetChatSessionQuery,
   useArchiveChatSessionMutation,
+  type Artifact,
   type ChatCitation,
   type ChatMessage,
 } from '@/services/onboardingApi'
@@ -75,10 +76,37 @@ function MessageBubble({ msg }: { msg: ChatMessage & { error?: boolean } }) {
         }`}
       >
         <p className="whitespace-pre-wrap">{msg.content}</p>
+        {!isUser && msg.artifacts && msg.artifacts.length > 0 && (
+          <ArtifactList artifacts={msg.artifacts} />
+        )}
         {!isUser && msg.citations && msg.citations.length > 0 && (
           <CitationList citations={msg.citations} />
         )}
       </div>
+    </div>
+  )
+}
+
+function ArtifactList({ artifacts }: { artifacts: Artifact[] }) {
+  if (artifacts.length === 0) return null
+  return (
+    <div className="mt-3 flex flex-col gap-2">
+      {artifacts.map((a) => (
+        <a
+          key={a.id}
+          href={a.url}
+          className="flex items-center gap-3 rounded-lg border bg-background/60 px-3 py-2 text-xs transition-colors hover:bg-background"
+        >
+          {a.kind === 'spreadsheet'
+            ? <FileSpreadsheet className="h-5 w-5 shrink-0 text-green-600" />
+            : <FileText className="h-5 w-5 shrink-0 text-blue-600" />}
+          <span className="min-w-0 flex-1">
+            <span className="block truncate font-medium">{a.filename}</span>
+            <span className="block text-muted-foreground">{a.summary} · {Math.max(1, Math.round(a.size / 1024))} KB</span>
+          </span>
+          <Download className="h-4 w-4 shrink-0 text-muted-foreground" />
+        </a>
+      ))}
     </div>
   )
 }
@@ -203,6 +231,7 @@ export default function Chat() {
       let buffer = ''
       let answer = ''
       let citations: ChatCitation[] = []
+      let artifacts: Artifact[] = []
       let failed: string | null = null
 
       // Server-sent events arrive as `data: {...}\n\n`, and a chunk can split
@@ -224,6 +253,9 @@ export default function Chat() {
             setStreamingText(answer)
           } else if (event.type === 'done') {
             citations = event.citations ?? []
+            artifacts = event.artifacts ?? []
+          } else if (event.type === 'notice') {
+            setToolTrail((prev) => [...prev, event.message])
           } else if (event.type === 'error') {
             failed = event.message
           }
@@ -234,6 +266,7 @@ export default function Chat() {
         role: 'assistant',
         content: failed ?? answer,
         citations,
+        artifacts,
         error: !!failed,
         created_at: new Date().toISOString(),
       }])
@@ -321,7 +354,7 @@ export default function Chat() {
               <div>
                 <p className="font-medium">Start a conversation</p>
                 <p className="text-sm text-muted-foreground mt-1">
-                  Ask anything about your indexed sources, or just say hi.
+                  Ask about the project, a person's work, a ticket's status — or ask for a spreadsheet.
                 </p>
               </div>
               <Button onClick={handleNewChat} disabled={creating} className="gap-2">

@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom'
 import {
-  ArrowUpRight, Ban, KeyRound, Loader2, Lock, ShieldCheck, Unlock, Users,
+  ArrowUpRight, Ban, KeyRound, Loader2, Lock, ShieldCheck, Unlock, Users, Wrench,
 } from 'lucide-react'
 import { AppShell } from '@/components/AppShell'
 import { Badge } from '@/components/ui/badge'
@@ -141,6 +141,7 @@ export default function Trust() {
           <CardContent className="flex flex-wrap gap-x-10 gap-y-4 pt-6">
             {[
               ['Sources connected', coverage.sources],
+              ['Tools it can use', coverage.tools ?? 0],
               ['Passages indexed', coverage.indexed_chunks],
               ['People who can ask', coverage.people_with_access],
               ['Invites pending', coverage.pending_invites],
@@ -188,6 +189,61 @@ export default function Trust() {
               </p>
             </div>
             {credentialed.map((g) => <GrantCard key={g.id} grant={g} canManage={data.can_manage} />)}
+          </div>
+        )}
+
+        {/* What it can DO, not just read. Each connection lists every tool by
+            class, and whether the owner has let writes through. */}
+        {(data.tools ?? []).length > 0 && (
+          <div className="flex flex-col gap-3">
+            <div>
+              <p className="text-sm font-medium">Tools it may use ({data.tools.length} connection{data.tools.length !== 1 ? 's' : ''})</p>
+              <p className="text-xs text-muted-foreground">
+                Every tool is classified read or write when it connects. Writes are refused inside the agent loop unless switched on here.
+              </p>
+            </div>
+            {data.tools.map((t) => (
+              <Card key={t.id}>
+                <CardHeader className="pb-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="secondary" className="text-xs">MCP</Badge>
+                    {t.allow_write ? (
+                      <Badge variant="outline" className="gap-1 border-amber-500/40 text-xs text-amber-600 dark:text-amber-500"><Unlock className="h-3 w-3" /> writes allowed</Badge>
+                    ) : (
+                      <Badge variant="outline" className="gap-1 text-xs"><Lock className="h-3 w-3" /> read-only</Badge>
+                    )}
+                    {t.credential_state === 'encrypted' && (
+                      <Badge variant="outline" className="gap-1 text-xs"><KeyRound className="h-3 w-3" /> credential encrypted</Badge>
+                    )}
+                    <span className="ml-auto text-xs text-muted-foreground">used {t.uses}×</span>
+                  </div>
+                  <CardTitle className="flex items-center gap-2 text-base"><Wrench className="h-4 w-4 text-muted-foreground" /> {t.name}</CardTitle>
+                  {t.url && <CardDescription className="font-mono text-xs">{t.url}</CardDescription>}
+                </CardHeader>
+                <CardContent className="text-sm">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-lg border bg-muted/20 p-3">
+                      <p className="text-xs font-medium text-muted-foreground">Sensei may</p>
+                      <p className="mt-1 text-sm leading-snug">
+                        Use {t.read_count} read tool{t.read_count !== 1 ? 's' : ''}{t.allow_write ? ` and ${t.write_count} write tool${t.write_count !== 1 ? 's' : ''}, when a person asks` : ''}.
+                      </p>
+                    </div>
+                    <div className="rounded-lg border bg-muted/20 p-3">
+                      <p className="text-xs font-medium text-muted-foreground">{t.allow_write ? 'It still never' : 'It is refused'}</p>
+                      <p className="mt-1 text-sm leading-snug">
+                        {t.allow_write
+                          ? 'Takes a write action nobody asked for. Unprompted work stays read-only.'
+                          : `The ${t.write_count} tool${t.write_count !== 1 ? 's' : ''} that change state. It can see them and will say so, but the call is cancelled.`}
+                      </p>
+                    </div>
+                  </div>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    {t.tools.slice(0, 8).map((x) => x.server_name).join(' · ')}{t.tools.length > 8 ? ` · +${t.tools.length - 8} more` : ''}
+                    {data.can_manage && <> — <Link to="/tools" className="underline underline-offset-2">manage</Link></>}
+                  </p>
+                </CardContent>
+              </Card>
+            ))}
           </div>
         )}
 

@@ -12,11 +12,13 @@ requests==2.32.3
 PyJWT==2.10.1
 bcrypt==4.2.1
 chromadb>=0.6
-strands-agents>=0.1
+strands-agents>=1.26
+mcp>=1.16,<2.0
 openai>=1.0
 groq>=0.13
 pypdf>=5.0
 python-docx>=1.1
+openpyxl>=3.1
 aiofiles>=24.0
 python-multipart>=0.0.20
 beautifulsoup4>=4.13

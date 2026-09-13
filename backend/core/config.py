@@ -32,6 +32,10 @@ class Settings(BaseSettings):
     # How often the agent re-reads connected sources looking for change.
     # 0 disables the loop; a manual check is always available.
     WATCH_INTERVAL_MINUTES: int = 0
+    # How many granted (MCP) tools are offered to the model on one turn. Every
+    # tool schema is re-sent on every call; a server like GitHub exposes fifty.
+    # The most relevant ones are chosen per question.
+    MAX_GRANT_TOOLS_PER_TURN: int = 12
     # Output ceiling per model response.
     MAX_OUTPUT_TOKENS: int = 8000
     CHROMA_PERSIST_DIR: str = "./chroma_data"
@@ -42,7 +46,10 @@ class Settings(BaseSettings):
     # environment itself. Prefer an IAM role in deployed environments.
     AWS_ACCESS_KEY_ID: str = ""
     AWS_SECRET_ACCESS_KEY: str = ""
-    BEDROCK_MODEL_ID: str = "anthropic.claude-3-5-sonnet-20241022-v2:0"
+    # Cross-region inference profiles; the bare model ids for Claude 3.5 are
+    # end-of-life on Bedrock and return ResourceNotFound.
+    BEDROCK_MODEL_ID: str = "us.anthropic.claude-sonnet-4-6"
+    BEDROCK_BACKGROUND_MODEL_ID: str = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
     LLM_BACKEND: str = "groq"   # "bedrock" | "groq" | "ollama"
     OLLAMA_BASE_URL: str = "http://localhost:11434/v1"
     OLLAMA_MODEL: str = "qwen3:4b"
