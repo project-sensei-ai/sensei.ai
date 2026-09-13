@@ -1,67 +1,67 @@
 # Sensei
 
-**A project teammate that does the work nobody asked it to do.**
+**A colleague you onboard, not a chatbot you prompt.**
 
-Most AI tools answer questions. Sensei starts before anyone asks one: when a
-project owner adds someone to a team, it researches the project and writes that
-person a cited onboarding brief. When a source finishes indexing, it audits what
-the project has *failed* to write down and offers to draft the missing documents
-itself. When it cannot answer something, it records the question so a single
-human reply turns into knowledge it has permanently.
+A project owner gives Sensei what they would give a new hire: the wiki space,
+the repo, the ticket project, and accounts on the tools the team uses. Then
+they add their team. From that point Sensei works for those people — before
+they ask, when they ask, and in the room with them.
 
-Built on the [Strands Agents SDK](https://strandsagents.com/).
+Built on the [Strands Agents SDK](https://strandsagents.com/). Entered in the
+Agents for Humans hackathon, Professional Agents track.
 
 ![Architecture](docs/assets/architecture.png)
 
-- **[TESTING.md](TESTING.md)** — demo account, what to try
-- **[DEPLOY.md](DEPLOY.md)** — one-container deployment
-- **[docs/CONNECTOR_ACCESS.md](docs/CONNECTOR_ACCESS.md)** — what each credential actually grants
-- **[docs/AGENTIC_PLAN.md](docs/AGENTIC_PLAN.md)** — the design behind the autonomy
+- **[TESTING.md](TESTING.md)** — two demo projects, two owners, what to try
+- **[DEPLOY.md](DEPLOY.md)** — one container on AWS with HTTPS, one command
+- **[docs/CONNECTOR_ACCESS.md](docs/CONNECTOR_ACCESS.md)** — what each credential and tool grant actually authorises
+- **[docs/SUBMISSION.md](docs/SUBMISSION.md)** — the pitch, the video script, the judge notes
 
 ---
 
 ## What it does
 
-### Work that starts without a prompt
+### Before anyone asks
 
 | | |
 |---|---|
-| **Onboarding brief** | An owner adds someone. Nobody asks for anything. A Strands `Graph` of three agents researches the project *for that person* and writes a typed brief — what this is, who owns what, what to read first, and an honest list of what the sources cannot tell them. It is waiting when they first log in. |
-| **Gap hunter** | When a source lands, the agent audits its own knowledge for what is *absent*: documents that should exist, components with no owner, references that go nowhere. For gaps the sources can actually support, it offers to write the document — and flags every line it inferred rather than found. |
-| **Answer ledger** | A question it could not ground is recorded rather than discarded. An owner answers once, it is indexed, and the agent answers it for everyone from then on. The project gets documented by being used. |
-| **Change watch** | It re-reads the connected sources, diffs them, and decides whether anything *material* moved. A typo: silence. A runbook deleted: a digest, and every brief written against the old state is marked stale. Most checks cost nothing — the diff runs before any model does. |
+| **Onboarding brief** | An owner adds someone. A Strands `Graph` of three agents researches the project *for that person* and writes a typed, cited brief — what this is, who owns what, what to read first, and an honest list of what the sources cannot tell them. It is waiting when they first log in. |
+| **Gap hunter** | When a source lands, the agent audits its own knowledge for what is *absent*: documents that should exist, components with no owner, references that go nowhere. Where the sources can support it, it drafts the missing page and flags every line it inferred. |
+| **Change watch** | It re-reads sources on a schedule, diffs them, and decides whether anything *material* moved. A typo: silence. A runbook deleted: a digest, and every brief written against the old state marked stale. |
+| **Answer ledger** | A question it could not ground is recorded. An owner answers once; it is indexed, and the agent answers it for everyone from then on. |
 
-### Work you ask for
+### When asked
 
-- **Cited chat**, streamed token by token, narrating each tool call as it runs —
-  *"Taking stock of what's indexed… Searching the project's documents…"*
-- **Sources**: GitHub, Confluence, file upload, URL crawl
-- **Trust & access**: every grant, its real ceiling, and how to revoke it
+- **Cited answers**, streamed token by token, every tool call narrated as it runs.
+- **Who did what** — "what has Priya changed recently" reads her commits, PRs and tickets, not prose that mentions her.
+- **Jira, live** — ticket status is read from Jira at the moment of asking, never from the index. A Confluence credential is a Jira credential too.
+- **Work, handed back as a file** — "put the open issues in a spreadsheet" produces an `.xlsx`; "write me a handover note" produces a `.docx`, attached to the reply.
+- **Tools the owner granted** — any MCP server (GitHub, Zapier for Gmail/Sheets/Slack, Sentry, an internal API) connected with the owner's credential. Its tools appear in the agent loop with the service's name as a prefix. Writes are refused, inside the loop, unless the owner switched them on for that connection — and the agent says exactly that instead of pretending.
+
+### In the room
+
+Sensei sits in a meeting — via the browser's microphone beside any call, or as
+a participant in a Google Meet that reads the live captions. It answers when
+addressed by name. It corrects a claim only when a typed verdict says the
+project's own documentation contradicts it, with confidence ≥ 0.8 and a
+citation; anything less and it stays quiet, and records why. When the call
+ends it writes the notes — decisions, action items, open questions — and
+indexes them, so next week's "what did we decide" is answerable with a citation
+to the meeting.
 
 ---
 
 ## Trust
 
-The product's argument is that an agent with access to your project should be
-able to show exactly what that access is.
+An agent with access to your project should be able to show exactly what that
+access is.
 
-- **Nobody reaches a project unless the owner added their email.** Invite tokens
-  are bound to one address and spent on first use. A link alone is not
-  authorisation.
-- **Passwords are never emailed.** An invite carries a single-use link and the
-  recipient sets their own.
-- **Credentials are encrypted at rest** with `SECRET_ENCRYPTION_KEY`, and never
-  returned by the API in any form.
-- **Every connector is read-only.** Nothing in this build writes to a connected
-  system.
-- **Two members can get different answers.** An owner can narrow what any
-  teammate is answered from, source by source. The filter runs inside the vector
-  query rather than after it, so a restricted person gets *different* results
-  rather than fewer — and the gaps never reveal what they were not shown.
-- **The Trust page states each credential's ceiling, not just what we read.**
-  A Confluence API token authorises as its owner across the whole site while
-  Sensei reads one space — and the page says so, because showing only the
-  narrower limit is a comfortable half-truth.
+- **Nobody reaches a project unless the owner added their email.** Invite tokens are bound to one address and spent on first use.
+- **Credentials are encrypted at rest** and never returned by the API. Sources are read-only by construction.
+- **Every tool is classified read or write on connection**, and write calls are cancelled by a Strands hook unless the owner allowed them. Unprompted work never writes anywhere.
+- **Two members can get different answers.** An owner narrows what any teammate is answered from; the filter runs inside the vector query, so a restricted person gets *different* results rather than fewer.
+- **Meeting transcripts are hearsay.** They are indexed for "what did we discuss", and excluded from claim checks, so one wrong remark never becomes "supported by the sources".
+- **The Trust page states each credential's ceiling, not just its floor.** A Confluence token authorises as its owner across the whole site while Sensei reads one space — the page says so.
 
 ---
 
@@ -97,22 +97,26 @@ FRONTEND_ORIGIN=http://localhost:5173
 DEBUG=true                  # drops the Secure cookie flag so login works over HTTP
 ```
 
-> Losing `SECRET_ENCRYPTION_KEY` makes existing sources unreadable — they have
-> to be reconnected.
+> Losing `SECRET_ENCRYPTION_KEY` makes existing sources and tool grants
+> unreadable — they have to be reconnected.
 
-### One container instead
+**Bedrock instead of Groq:** `LLM_BACKEND=bedrock` with an IAM principal
+(not the account root — Bedrock refuses root) that has `bedrock:InvokeModel`,
+and a current inference profile such as `us.anthropic.claude-sonnet-4-6`.
+
+### One container
 
 ```bash
 docker compose up --build      # builds the SPA and serves everything on :8000
 ```
 
-The image builds the React app and FastAPI serves it alongside `/api/*`, so a
-deployment is one container and one URL — no CORS, no second service.
+For a public HTTPS URL on AWS, see [DEPLOY.md](DEPLOY.md) — `deploy/launch-ec2.sh`
+is one command from a laptop with AWS credentials to a running instance.
 
 ### Tests
 
 ```bash
-cd backend && python -m pytest -q            # 33 tests, no model calls, ~0.4s
+cd backend && python -m pytest -q            # 48 tests, no model calls, ~0.4s
 
 # browser journeys, against a running server
 E2E_OWNER_PASSWORD=... python -m pytest tests/e2e -q
@@ -122,31 +126,34 @@ E2E_OWNER_PASSWORD=... python -m pytest tests/e2e -q
 
 ## How it works
 
+**Equipping the agent.** Every turn builds a `Colleague`: the index tools,
+the live Jira tools when an Atlassian credential exists, the work tools, and
+the dozen most relevant tools from the owner's MCP grants — a server like
+GitHub exposes fifty, and their schemas cost more tokens than the question.
+MCP sessions are pooled across turns and closed off the event loop.
+
+**The write gate.** `WriteGate` is a Strands `HookProvider` on
+`BeforeToolCallEvent`. A granted tool the owner has not permitted gets
+`cancel_tool` set with a message; the model receives that message as the tool
+result and tells the person. The tool stays *visible* on purpose, so the agent
+can say "I can see `create_issue` but I'm not allowed to use it" instead of
+pretending the capability does not exist.
+
 **Ingestion.** Each source is fetched, chunked at 800 characters and embedded
 into a per-workspace ChromaDB collection. Every chunk carries a provenance
-header — `[Confluence: ENG › Architecture doc]` — into the embedded text, so a
-document can be found by its own name. Chunks are 800 rather than 2000 because
-the default embedder truncates at 256 tokens; larger chunks are half-invisible
-to search.
+header — `[Confluence: SD › Apollo — Deployment runbook]` — so a document can
+be found by its own name. Chunks are 800 rather than 2000 because the default
+embedder truncates at 256 tokens.
 
-**Answering.** The Strands agent loop chooses its tools. `search_project_docs`
-for "what does X say", `list_project_knowledge` for "is there a doc about X" —
-a question about the shelf, not the books. Answers cite their sources, and the
-agent says so plainly when the project does not cover something.
+**Staying quiet.** Three features exist mainly to decide *not* to speak. The
+change watcher hashes documents before any model runs. In a channel, the agent
+posts only when it can cite a source. In a meeting, a correction needs a typed
+`ClaimVerdict` — contradicted, confidence ≥ 0.8, and a citation — retrieved
+from documentation with transcripts excluded.
 
-**Background work.** Briefs, audits and change checks run as background tasks.
-Research is cached per project and composed per person, so adding five teammates
-researches once rather than five times.
-
-**Staying quiet.** Two features exist mainly to decide *not* to speak. The change
-watcher hashes documents and diffs them before any model is called, so an
-unchanged project costs nothing. And when the agent reads a team channel, it
-answers only when it could cite a source — measured on this project, similarity
-scores do not separate "documented" from "not", but whether it can produce a
-citation does.
-
-**Model backends.** One flag. `LLM_BACKEND=bedrock | groq | ollama`. Background
-agents run a smaller model than interactive chat.
+**Model backends.** One flag: `LLM_BACKEND=bedrock | groq | ollama`.
+Background agents run a smaller model than interactive chat. On Groq, a
+fallback chain routes around a model whose daily quota is exhausted.
 
 ---
 
@@ -154,13 +161,11 @@ agents run a smaller model than interactive chat.
 
 | | Owner | Member |
 |---|---|---|
-| Connect and manage sources | ✅ | — |
-| Add and remove teammates | ✅ | — |
+| Connect sources, grant tools, allow writes | ✅ | — |
+| Add and remove teammates, narrow what they see | ✅ | — |
 | Answer ledger questions | ✅ | — |
-| Ask the agent, read its briefs | ✅ | ✅ |
-| See who has access | ✅ | ✅ |
-
-Members never see the onboarding wizard; it is an owner's tool.
+| Ask, get files, bring it into a meeting | ✅ | ✅ |
+| See what it can reach and do | ✅ | ✅ |
 
 ---
 
@@ -168,17 +173,18 @@ Members never see the onboarding wizard; it is an owner's tool.
 
 ```
 backend/
-├── agent/          brief.py · gaps.py · watch.py · tools.py · ingest.py · agent.py
-├── answers/        the answer ledger
-├── watch/          change digests
-├── channels/       channel abstraction + when to speak unbidden
-├── trust/          what the agent can reach and how to revoke it
-├── activity/       what it did, and which of it was unprompted
-├── auth/ workspaces/ sources/ ingest/ chat/ briefs/ gaps/
+├── agent/          agent.py (build_colleague) · tools.py · people.py · jira.py · work.py
+│                   brief.py · gaps.py · watch.py · ingest.py
+├── toolgrants/     registry.py (MCP transports, read/write classification, WriteGate) · pool.py · routes.py
+├── meetings/       listener.py (answer / correct / silent) · meet_bot.py (Playwright) · routes.py
+├── artifacts/      files the agent produced
+├── answers/ watch/ channels/ trust/ activity/ auth/ workspaces/ sources/ ingest/ chat/ briefs/ gaps/
 ├── core/           config · security · secrets · mailer · errors
 ├── db/             membership.py is the single access rule
-└── tests/          33 unit tests + 7 browser journeys
-frontend/src/pages/ Dashboard · Brief · Gaps · Answers · Trust · Chat · Sources
+├── scripts/        seed_confluence.py · seed_apollo.py — the demo projects, built through the API
+└── tests/          48 unit tests + 7 browser journeys
+frontend/src/pages/ Dashboard · Brief · Gaps · Answers · Trust · Sources · Tools · Meetings · Chat
+deploy/             docker-compose.prod.yml · Caddyfile · launch-ec2.sh
 ```
 
 ---

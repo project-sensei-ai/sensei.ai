@@ -145,7 +145,18 @@ function LiveMeeting({ meeting, onEnded }: { meeting: Meeting; onEnded: () => vo
           seenReplies.current.add(body.reply.id)
           speak(body.reply.text, voice)
         }
+      } else {
+        const detail = (await res.json().catch(() => ({})))?.detail
+        setLines((l) => [...l, { kind: 'reply', r: {
+          id: `err-${Date.now()}`, at: new Date().toISOString(), kind: 'silent', trigger: clean,
+          text: '', citations: [], confidence: 0, reason: detail || `could not reach Sensei (${res.status})`,
+        } }])
       }
+    } catch {
+      setLines((l) => [...l, { kind: 'reply', r: {
+        id: `err-${Date.now()}`, at: new Date().toISOString(), kind: 'silent', trigger: clean,
+        text: '', citations: [], confidence: 0, reason: 'could not reach Sensei — is the server up?',
+      } }])
     } finally {
       setPending((p) => p.filter((x) => x !== clean))
     }

@@ -502,9 +502,14 @@ def make_search_tool(
     passage_chars: int = 800,
     budget: int = 3,
     allowed_sources: list[str] | None = None,
+    exclude_data_types: list[str] | None = None,
 ):
     """
     Factory that returns a (search_tool, captured_results) pair.
+
+    exclude_data_types drops whole classes of record from the query — the
+    meeting listener uses it to keep transcripts out of claim checks, because
+    a thing somebody said last week is hearsay, not documentation.
     The search_tool is a Strands @tool that queries the workspace ChromaDB collection.
     captured_results accumulates citation data from each tool call for the caller to read.
     """
@@ -563,13 +568,20 @@ def make_search_tool(
             "n_results": n,
             "include": ["documents", "metadatas", "distances"],
         }
+        clauses = []
         if allowed_sources is not None:
             if not allowed_sources:
                 return (
                     "You have not been given access to any of this project's sources. "
                     "Ask the project owner."
                 )
-            query_args["where"] = {"source_id": {"$in": allowed_sources}}
+            clauses.append({"source_id": {"$in": allowed_sources}})
+        if exclude_data_types:
+            clauses.append({"data_type": {"$nin": list(exclude_data_types)}})
+        if len(clauses) == 1:
+            query_args["where"] = clauses[0]
+        elif clauses:
+            query_args["where"] = {"$and": clauses}
 
         results = collection.query(**query_args)
 

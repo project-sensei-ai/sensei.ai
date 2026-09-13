@@ -25,13 +25,14 @@ def make_people_tool(workspace_id: str, chroma_client, allowed_sources: list[str
     @tool
     def who_did_what(person: str, topic: str = "") -> str:
         """
-        What a specific person has done on this project — their commits, pull
-        requests, issues, reviews and tickets — optionally narrowed to a topic.
+        What a specific person (or bot, e.g. Copilot, dependabot) has done on
+        this project — their commits, pull requests, issues, reviews and tickets.
 
-        Use for "what did X work on", "what has Priya changed recently", "who
-        touched the payments service", "what is Ramesh assigned". `person` is a
-        name, handle or email fragment; matching is case-insensitive and
-        partial. Returns dated activity lines, newest first where dates exist.
+        ALWAYS use this, not search_project_docs, when a question names a person
+        and asks about their work: "what did X work on", "what has Priya changed
+        recently", "who touched the payments service", "what is Ramesh assigned",
+        "what did Copilot do". `person` is a name, handle or email fragment;
+        matching is case-insensitive and partial. Optional `topic` narrows it.
         """
         collection = get_workspace_collection(chroma_client, workspace_id)
         if collection.count() == 0:

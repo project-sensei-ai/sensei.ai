@@ -25,6 +25,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from core import secrets
+from db.models import _iso
 
 KINDS = ("mcp_http", "mcp_sse", "mcp_stdio")
 
@@ -306,8 +307,8 @@ def serialize_grant(doc: dict, for_owner: bool = False) -> dict:
         "write_count": sum(1 for t in tools if t.get("access") == "write"),
         "status": doc.get("status", "connected"),
         "error_message": doc.get("error_message"),
-        "created_at": doc.get("created_at").isoformat() if doc.get("created_at") else None,
-        "last_used_at": doc.get("last_used_at").isoformat() if doc.get("last_used_at") else None,
+        "created_at": _iso(doc.get("created_at")),
+        "last_used_at": _iso(doc.get("last_used_at")),
         "uses": doc.get("uses", 0),
     }
     if for_owner:

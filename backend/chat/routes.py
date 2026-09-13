@@ -12,12 +12,14 @@ from agent.agent import build_colleague, make_session_manager
 from answers import store as answer_store
 from artifacts.routes import serialize_artifact
 from auth.deps import get_current_user
-from core.errors import humanise
+from core.errors import humanise, is_quota_error, model_named_in
+from agent.agent import mark_exhausted
 from db.chroma import get_chroma
 from db.database import get_db
 from db.membership import require_workspace, visible_sources
 from db.models import serialize_chat_session
 from toolgrants import registry as grants
+from toolgrants import pool
 
 router = APIRouter(tags=["chat"])
 
@@ -45,12 +47,13 @@ async def _equip(db, chroma, session: dict, user: dict, session_id: str, questio
     allowed = await visible_sources(db, ws, user["id"])
     sources = [s async for s in db.sources.find({"workspace_id": ws})]
     grant_docs = await grants.load_grants(db, ws)
+    grant_session = await pool.get_session(ws, grant_docs)
     col = await asyncio.to_thread(
         build_colleague,
         ws, chroma,
         sources=sources, grants=grant_docs, user_id=user["id"],
         session_manager=make_session_manager(session_id), allowed_sources=allowed,
-        question=question,
+        question=question, grant_session=grant_session,
     )
     return col
 
@@ -206,24 +209,37 @@ async def stream_message(
                 yield _sse({"type": "notice",
                             "message": f"{u['grant']} is not answering right now, so its tools are unavailable this turn."})
 
-            async for chunk in col.agent.stream_async(body.question):
-                # A tool starting. Announced once per invocation, not once per
-                # streamed fragment of its arguments.
-                tool = chunk.get("current_tool_use")
-                if tool and tool.get("toolUseId") not in announced:
-                    announced.add(tool["toolUseId"])
-                    name = tool.get("name", "")
-                    tools_used.append(name)
-                    yield _sse({
-                        "type": "tool",
-                        "name": name,
-                        "label": col.narration.get(name, f"Using {name.replace('_', ' ')}"),
-                    })
+            # One retry on a daily-quota error, on the next model with quota
+            # left. A demo should not go dark because one model's day ran out.
+            for attempt in range(2):
+                try:
+                    async for chunk in col.agent.stream_async(body.question):
+                        # A tool starting. Announced once per invocation, not once
+                        # per streamed fragment of its arguments.
+                        tool = chunk.get("current_tool_use")
+                        if tool and tool.get("toolUseId") not in announced:
+                            announced.add(tool["toolUseId"])
+                            name = tool.get("name", "")
+                            tools_used.append(name)
+                            yield _sse({
+                                "type": "tool",
+                                "name": name,
+                                "label": col.narration.get(name, f"Using {name.replace('_', ' ')}"),
+                            })
 
-                text = chunk.get("data")
-                if text:
-                    answer_parts.append(text)
-                    yield _sse({"type": "text", "delta": text})
+                        text = chunk.get("data")
+                        if text:
+                            answer_parts.append(text)
+                            yield _sse({"type": "text", "delta": text})
+                    break
+                except Exception as exc:
+                    if attempt == 0 and is_quota_error(exc) and not answer_parts:
+                        mark_exhausted(model_named_in(exc) or getattr(getattr(col.agent, "model", None), "config", {}).get("model_id"))
+                        col.close()
+                        yield _sse({"type": "notice", "message": "One model hit its daily limit — switching to another."})
+                        col = await _equip(db, chroma, session, user, session_id, body.question)
+                        continue
+                    raise
 
             answer = "".join(answer_parts)
             col.close()

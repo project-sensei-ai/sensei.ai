@@ -96,6 +96,10 @@ def make_jira_tools(sources: list[dict]) -> list:
                             "jql": jql, "maxResults": max(1, min(int(max_results), 25)),
                             "fields": "summary,status,assignee,updated,priority",
                         })
+                if r.status_code == 404:
+                    out.append(f"[{c['label']}] This Atlassian site has Confluence but Jira is not enabled on it, "
+                               "so there are no tickets to search. Say so rather than guessing.")
+                    continue
                 if r.status_code == 400:
                     msg = "; ".join((r.json().get("errorMessages") or [])[:2]) or "bad JQL"
                     out.append(f"[{c['label']}] Jira rejected the query: {msg}")

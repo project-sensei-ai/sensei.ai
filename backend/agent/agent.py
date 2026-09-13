@@ -1,8 +1,52 @@
+import time
 from dataclasses import dataclass, field
 
 from strands import Agent, ModelRetryStrategy
 
 from core.config import settings
+
+# Models that hit their daily cap, with when. Skipped for an hour, then tried
+# again — the cap is a rolling window, and a model that was dead at 9am may be
+# back by 10. Process-local on purpose: a restart is a fine way to reset it.
+_EXHAUSTED: dict[str, float] = {}
+_EXHAUSTED_FOR = 3600.0
+
+
+def mark_exhausted(model_id: str | None) -> None:
+    if model_id:
+        _EXHAUSTED[model_id] = time.time()
+        print(f"[models] {model_id} hit its daily cap — routing around it for an hour")
+
+
+def _usable(model_id: str) -> bool:
+    since = _EXHAUSTED.get(model_id)
+    return since is None or (time.time() - since) > _EXHAUSTED_FOR
+
+
+async def retry_on_quota(fn, *args, **kwargs):
+    """
+    Run a background job; if a model's daily quota ended it, route around that
+    model and run it once more. Agents are built inside `fn`, so the retry
+    picks up the fallback automatically.
+    """
+    from core.errors import is_quota_error, model_named_in
+    try:
+        return await fn(*args, **kwargs)
+    except Exception as exc:
+        if not is_quota_error(exc):
+            raise
+        mark_exhausted(model_named_in(exc) or pick_groq_model(background=True))
+        return await fn(*args, **kwargs)
+
+
+def pick_groq_model(background: bool) -> str:
+    """The configured model, or the first fallback with quota left."""
+    preferred = settings.GROQ_BACKGROUND_MODEL if background else settings.GROQ_MODEL
+    chain = [preferred] + [m.strip() for m in settings.GROQ_FALLBACK_MODELS.split(",") if m.strip()]
+    for m in chain:
+        if _usable(m):
+            return m
+    return preferred
 from .tools import make_inventory_tool, make_search_tool, search_knowledge_base
 
 SENSEI_SYSTEM_PROMPT = """You are Sensei, a colleague on this project — not a chatbot. You were onboarded
@@ -29,7 +73,8 @@ to tools. You think, look things up, do the work, and say plainly what you canno
 
 ## How to work
 - Decide which tool answers the question; do not search when the answer is live
-  (ticket status, open PRs) or about a person (use who_did_what).
+  (ticket status, open PRs) or about a person's work (use who_did_what — a
+  question that names a person or bot and asks what they did goes there first).
 - Search **once**; a second time only if the first genuinely missed; never a third
   with the same intent. If two searches found nothing, the project does not
   contain it — say so and stop.
@@ -90,7 +135,7 @@ def _build_model(background: bool = False):
         )
     from strands.models.openai import OpenAIModel
     return OpenAIModel(
-        model_id=settings.GROQ_BACKGROUND_MODEL if background else settings.GROQ_MODEL,
+        model_id=pick_groq_model(background),
         client_args={
             "api_key": settings.GROQ_API_KEY,
             "base_url": "https://api.groq.com/openai/v1",
@@ -193,6 +238,7 @@ def build_colleague(
     allowed_sources: list[str] | None = None,
     question: str = "",
     max_grant_tools: int | None = None,
+    grant_session=None,
 ) -> Colleague:
     """
     Everything the chat agent gets: the index tools, the live Jira tools when a
@@ -223,10 +269,12 @@ def build_colleague(
 
     narration = dict(BUILTIN_NARRATION)
     hooks = []
-    grant_session = None
     refusals: list = []
-    if grants:
+    if grants and grant_session is None:
+        # Callers normally pass a warm session from toolgrants.pool; opening
+        # here is the fallback for one-off use (tests, scripts).
         grant_session = GrantSession().open(grants)
+    if grant_session is not None:
         limit = max_grant_tools if max_grant_tools is not None else settings.MAX_GRANT_TOOLS_PER_TURN
         tools.extend(select_relevant(grant_session.tools, question, limit))
         narration.update(grant_session.narration)
@@ -252,7 +300,9 @@ def build_colleague(
         refusals=refusals,
         unavailable=grant_session.failed if grant_session else [],
     )
-    col._grants = grant_session
+    # The session belongs to the pool, not to this turn — closing it here would
+    # tear down a connection every other turn is about to use.
+    col._grants = None
     return col
 
 

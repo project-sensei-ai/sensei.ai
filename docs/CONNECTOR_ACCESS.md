@@ -116,6 +116,59 @@ it is stored so this fails loudly rather than quietly.
 
 ---
 
+## Tool grants (MCP servers)
+
+A source is something the agent reads. A tool grant is something it can
+*use*: any server speaking the Model Context Protocol — GitHub's, Zapier's
+(which fronts Gmail, Sheets, Slack, Calendar and thousands more), Sentry's, or
+one an organisation runs internally — connected with a credential the owner
+pastes as the Authorization header.
+
+**What we ask for:** a name, the server URL (or a local command for stdio
+servers), and optionally an Authorization value.
+
+**Ceiling.** Whatever the token's account can do on that service. A GitHub
+PAT with `repo` can open, comment on and close issues and PRs across every
+repository it can see; a Zapier MCP token can do whatever the Zapier account's
+enabled actions can.
+
+**Floor, and how it is enforced.** On connection, every tool the server lists
+is classified **read** or **write** — from the server's own annotations when
+it provides them (`readOnlyHint`, `destructiveHint`), and from the tool's name
+otherwise. Write tools are refused unless the owner switches *Allow writes* on
+for that connection. The refusal is a Strands `BeforeToolCallEvent` hook that
+cancels the call inside the agent loop and hands the model a message saying so;
+it does not depend on the prompt being obeyed. Individual tools can also be
+disabled by name. Unprompted work (briefs, audits, the watcher) never gets
+granted tools at all.
+
+**What the owner sees.** The Tools page and the Trust page list every tool by
+name and class, whether writes are allowed, how many times the connection was
+used and when. Revoking takes effect on the next turn.
+
+**Recommendation, same as every connector:** give the agent its own account on
+the service, scoped to the project — a fine-grained GitHub PAT limited to the
+project's repositories, a Zapier account with only the needed actions enabled.
+Then the ceiling is enforced by the service, not only by our gate.
+
+---
+
+## Meetings
+
+**Companion mode** transcribes the microphone of the device running the page
+and posts each finished sentence to the server. Nothing is recorded; the
+transcript exists only as text, and only the people on the project can read
+it. **Bot mode** joins a Google Meet as a named guest; the host admits it, and
+it reads the meeting's own live captions.
+
+**Ceiling:** the words said while it is in the call. **Floor:** the same. It
+cannot join a meeting it was not sent to, and cannot hear anything after it
+leaves. Ended meetings are summarised and indexed as a source labelled as a
+meeting; claim checks exclude that source, so a remark in one meeting can
+never be cited as documentation in the next.
+
+---
+
 ## What we will not do
 
 - **Ask for a password.** Never, for any connector. Tokens can be revoked and
@@ -136,6 +189,8 @@ it is stored so this fails loudly rather than quietly.
 | GitHub | Classic PAT | Every repo the account sees | One repo per source | GitHub App, per-repo install |
 | Files | none | — | What was uploaded | — |
 | URLs | none | Public web only | The listed pages | — |
+| MCP tool grant | Bearer token or API key | Whatever that account can do on the service | Read tools; write tools only if the owner allowed them, enforced in a hook | A service account scoped to the project |
+| Meetings | none | What is said while it is in the call | The same | — |
 
 The pattern in the right-hand column is the same every time: move from a
 credential that borrows a human's whole identity to one that carries its own,

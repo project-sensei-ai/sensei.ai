@@ -46,6 +46,20 @@ _KNOWN = [
 ]
 
 
+_QUOTA = re.compile(r"tokens per day|TPD|daily limit", re.I)
+_MODEL_IN_ERROR = re.compile(r"model `([^`]+)`|model ([\w./-]+)", re.I)
+
+
+def is_quota_error(exc: BaseException | str) -> bool:
+    """A daily cap, as opposed to a per-minute rate limit worth retrying."""
+    return bool(_QUOTA.search(str(exc)))
+
+
+def model_named_in(exc: BaseException | str) -> str | None:
+    m = _MODEL_IN_ERROR.search(str(exc))
+    return (m.group(1) or m.group(2)) if m else None
+
+
 def humanise(exc: BaseException | str, fallback: str = "Something went wrong.") -> str:
     """
     A sentence a person can act on, instead of a provider's stack trace.

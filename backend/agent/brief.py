@@ -238,12 +238,13 @@ async def generate_brief(db, chroma_client, workspace_id: str, user_id: str) -> 
     )
 
     try:
-        findings = await get_or_build_research(db, chroma_client, workspace_id)
+        from agent.agent import retry_on_quota
+        findings = await retry_on_quota(get_or_build_research, db, chroma_client, workspace_id)
         if not findings.strip():
             raise RuntimeError(
                 "Nothing is indexed for this project yet, so there is nothing to brief on."
             )
-        brief = await compose_brief(findings, person, workspace.get("name", "this project"))
+        brief = await retry_on_quota(compose_brief, findings, person, workspace.get("name", "this project"))
         await usage.record(db, workspace_id, "brief.compose", None, settings.GROQ_BACKGROUND_MODEL)
         await db.briefs.update_one(
             {"workspace_id": workspace_id, "user_id": user_id},

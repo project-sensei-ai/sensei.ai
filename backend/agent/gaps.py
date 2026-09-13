@@ -218,7 +218,8 @@ async def scan_gaps(db, chroma_client, workspace_id: str, force: bool = False) -
     )
 
     try:
-        report = await audit_project(workspace_id, chroma_client, db)
+        from agent.agent import retry_on_quota
+        report = await retry_on_quota(audit_project, workspace_id, chroma_client, db)
         gaps = []
         for g in report.gaps:
             d = g.model_dump()

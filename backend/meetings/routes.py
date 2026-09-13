@@ -26,7 +26,8 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request,
 from pydantic import BaseModel, Field
 
 from auth.deps import get_current_user
-from core.errors import humanise
+from agent.agent import mark_exhausted, pick_groq_model
+from core.errors import humanise, is_quota_error, model_named_in
 from db.chroma import get_chroma
 from db.database import get_db
 from db.membership import OWNER_ROLES, require_workspace, visible_sources
@@ -138,10 +139,18 @@ async def hear(meeting_id: str, body: UtteranceIn, request: Request,
     recent = (doc.get("transcript") or [])[-6:]
     context = "\n".join(f"{u['speaker']}: {u['text']}" for u in recent)
     allowed = await visible_sources(db, ws["_id"], user["id"])
-    try:
-        reply = await listener.consider(ws["_id"], get_chroma(request), utterance["text"], context, allowed)
-    except Exception as exc:
-        reply = listener.Reply(kind="silent", reason=f"could not judge it: {humanise(exc)}", trigger=utterance["text"])
+    reply = None
+    for attempt in range(2):
+        try:
+            reply = await listener.consider(ws["_id"], get_chroma(request), utterance["text"], context, allowed)
+            break
+        except Exception as exc:
+            if attempt == 0 and is_quota_error(exc):
+                mark_exhausted(model_named_in(exc) or pick_groq_model(background=True))
+                continue
+            reply = listener.Reply(kind="silent", reason=f"could not judge it: {humanise(exc)}", trigger=utterance["text"])
+    if reply is None:
+        reply = listener.Reply(kind="silent", reason="could not judge it", trigger=utterance["text"])
 
     reply_doc = {"_id": uuid4().hex, **reply.to_doc()}
     await db.meetings.update_one({"_id": meeting_id}, {"$push": {"replies": reply_doc}})
@@ -162,7 +171,8 @@ async def _finish(db, chroma_client, meeting_id: str) -> None:
         except Exception as exc:
             print(f"[meetings] summary failed: {exc}")
     held_at = _iso(doc.get("started_at")) or ""
-    text = listener.transcript_as_document(doc.get("title", "Meeting"), held_at, transcript, summary)
+    text = listener.transcript_as_document(doc.get("title", "Meeting"), held_at, transcript, summary,
+                                           doc.get("replies") or [])
 
     now = datetime.now(timezone.utc)
     source = {

@@ -103,16 +103,32 @@ _ANSWER_PROMPT = """You are Sensei, a colleague sitting in this meeting. Someone
 and asked you something. Answer the way a person would out loud: two to four
 sentences, no headings, no bullet lists, no markdown. Lead with the answer.
 Name the source in plain words ("the architecture doc says…", "per PROJ-412").
-If the project's sources do not cover it, say so in one sentence and stop —
-never guess in a meeting. Use `search_project_docs` once; use
-`list_project_knowledge` if they ask what you know about.
 
-Recent conversation, for context:
+The ONLY evidence you may use is the passages below, retrieved from the
+project's own sources. The conversation transcript tells you what was asked
+and what it refers to — it is NOT evidence, and something a colleague said a
+minute ago may be wrong. Passages labelled as a meeting are what someone said
+in an earlier meeting: hearsay, useful for "what did we discuss", never proof
+of a technical fact. When a document and a meeting disagree, the document wins
+and you should say so. If the passages do not answer the question, say in one
+sentence that the project's sources do not cover it, and stop. Never guess in a
+meeting. If the passages contradict what someone in the room just said, say so
+plainly and name the source.
+
+Recent conversation (context only, not evidence):
 {context}
+
+Passages from the project's sources (the evidence):
+{passages}
 """
 
 _VERDICT_PROMPT = """You check claims people make in meetings against a project's own documentation.
-You are given a claim and passages retrieved from the sources. Decide, strictly:
+You are given a claim and passages retrieved from the sources. Before deciding,
+call `search_project_docs` ONCE with the claim's TOPIC in neutral words — for
+"the vector store is Pinecone" search "vector store"; for "deploys go to
+us-west-2" search "deployment region" — so the document that states the real
+value is in front of you even when the claim's wording does not match it.
+Then decide, strictly:
 
 - `contradicted` is true ONLY if a passage states something that cannot both be
   true with the claim. Absence of evidence is NOT contradiction.
@@ -141,9 +157,13 @@ async def answer_when_addressed(workspace_id: str, chroma_client, text: str, con
         workspace_id, chroma_client, n_results=5, passage_chars=500, budget=2,
         allowed_sources=allowed_sources,
     )
+    question = strip_address(text) or text
+    # Retrieve before the model runs, so the answer is grounded whether or not
+    # the model decides to call a tool — in a meeting there is no second turn.
+    passages = search_tool(query=question)
     inventory = make_inventory_tool(workspace_id, chroma_client, allowed_sources)
-    agent = _agent(_ANSWER_PROMPT.format(context=context or "(none)"), [search_tool, inventory])
-    result = await agent.invoke_async(strip_address(text) or text)
+    agent = _agent(_ANSWER_PROMPT.format(context=context or "(none)", passages=passages), [search_tool, inventory])
+    result = await agent.invoke_async(question)
     return Reply(kind="answer", text=str(result).strip(), citations=list(captured),
                  confidence=1.0 if captured else 0.5, reason="addressed by name", trigger=text)
 
@@ -163,18 +183,26 @@ async def check_claim(workspace_id: str, chroma_client, text: str,
                      trigger=text, confidence=score)
 
     # Retrieve once, then judge with a typed verdict — no free-form prose to parse.
+    # Meeting transcripts are excluded: a claim is checked against what the
+    # project wrote down, not against what somebody said in a previous call —
+    # otherwise one wrong remark becomes "supported by the sources" next week.
     search_tool, captured = make_search_tool(
         workspace_id, chroma_client, n_results=5, passage_chars=600, budget=1,
-        allowed_sources=allowed_sources,
+        allowed_sources=allowed_sources, exclude_data_types=["meeting"],
     )
     passages = search_tool(query=text)
     if not captured:
         return Reply(kind="silent", reason="nothing retrievable to check it against", trigger=text)
 
-    judge = _agent(_VERDICT_PROMPT)
+    topic_search, more = make_search_tool(
+        workspace_id, chroma_client, n_results=4, passage_chars=600, budget=1,
+        allowed_sources=allowed_sources, exclude_data_types=["meeting"],
+    )
+    judge = _agent(_VERDICT_PROMPT, [topic_search])
     verdict = await judge.structured_output_async(
         ClaimVerdict, f"Claim (said in a meeting): {text}\n\nPassages from the project's sources:\n\n{passages}"
     )
+    captured.extend(c for c in more if c["source_label"] not in {x["source_label"] for x in captured})
     if not verdict.is_factual_claim:
         return Reply(kind="silent", reason="the model did not read it as a checkable claim", trigger=text)
     if not verdict.contradicted:
@@ -222,8 +250,13 @@ async def summarise(title: str, transcript: list[dict]) -> MeetingSummary:
     )
 
 
-def transcript_as_document(title: str, held_at: str, transcript: list[dict], summary: MeetingSummary | None) -> str:
+def transcript_as_document(title: str, held_at: str, transcript: list[dict], summary: MeetingSummary | None,
+                           replies: list[dict] | None = None) -> str:
+    """The notes that get indexed. The agent's own corrections are written in
+    beside the remark they corrected, so the record carries the fix and not
+    just the mistake."""
     parts = [f"# Meeting: {title}", f"Held: {held_at[:16].replace('T', ' ')} UTC", ""]
+    spoken = {r.get("trigger"): r for r in (replies or []) if r.get("kind") in ("answer", "correction")}
     if summary:
         parts += ["## Summary", summary.summary, ""]
         if summary.decisions:
@@ -232,5 +265,11 @@ def transcript_as_document(title: str, held_at: str, transcript: list[dict], sum
             parts += ["## Action items"] + [f"- {a}" for a in summary.action_items] + [""]
         if summary.open_questions:
             parts += ["## Open questions"] + [f"- {q}" for q in summary.open_questions] + [""]
-    parts += ["## Transcript"] + [f"{u.get('speaker', '?')}: {u.get('text', '')}" for u in transcript]
+    parts += ["## Transcript (what people said — not verified facts)"]
+    for u in transcript:
+        parts.append(f"{u.get('speaker', '?')}: {u.get('text', '')}")
+        r = spoken.get(u.get("text"))
+        if r:
+            tag = "Sensei (correction, from the sources)" if r["kind"] == "correction" else "Sensei (answer, from the sources)"
+            parts.append(f"{tag}: {r.get('text', '')}")
     return "\n".join(parts)

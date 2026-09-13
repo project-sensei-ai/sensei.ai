@@ -157,7 +157,10 @@ async def run_ingestion(db, chroma_client, source_id: str) -> None:
 
         # A source landing is an event worth reacting to: re-audit what the
         # project still has not written down. Debounced inside scan_gaps, so
-        # connecting seven sources does not trigger seven audits.
+        # connecting seven sources does not trigger seven audits. Meeting notes
+        # are excluded: a transcript landing says nothing about documentation.
+        if source["type"] == "meeting":
+            return
         try:
             from agent.gaps import scan_gaps
             await scan_gaps(db, chroma_client, source["workspace_id"])

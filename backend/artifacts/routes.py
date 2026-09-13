@@ -7,6 +7,7 @@ from fastapi.responses import FileResponse
 from auth.deps import get_current_user
 from db.database import get_db
 from db.membership import require_workspace
+from db.models import _iso
 
 router = APIRouter(tags=["artifacts"])
 
@@ -20,7 +21,7 @@ def serialize_artifact(doc: dict) -> dict:
         "mime": doc.get("mime"),
         "size": doc.get("size", 0),
         "summary": doc.get("summary"),
-        "created_at": doc["created_at"].isoformat() if doc.get("created_at") else None,
+        "created_at": _iso(doc.get("created_at")),
         "url": f"/api/artifacts/{doc['_id']}",
     }
 

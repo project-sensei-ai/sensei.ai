@@ -96,6 +96,13 @@ async def lifespan(app: FastAPI):
     if watcher is not None:
         watcher.cancel()
 
+    # Warm MCP sessions hold background threads; close them off the loop.
+    try:
+        from toolgrants.pool import close_all
+        await close_all()
+    except Exception:
+        pass
+
     if getattr(app.state, "mongo_client", None) is not None:
         app.state.mongo_client.close()
     app.state.chroma_client = None

@@ -1,7 +1,16 @@
 def _iso(val) -> str | None:
+    """
+    ISO-8601 with an explicit zone. Mongo hands datetimes back naive, in UTC;
+    serialised bare, a browser reads them as local time and "just now" becomes
+    "5 hours ago" in Hyderabad.
+    """
     if val is None:
         return None
-    return val.isoformat() if hasattr(val, "isoformat") else val
+    if not hasattr(val, "isoformat"):
+        return val
+    if getattr(val, "tzinfo", None) is None:
+        return val.isoformat() + "Z"
+    return val.isoformat()
 
 
 def serialize_user(doc: dict) -> dict:

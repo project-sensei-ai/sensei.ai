@@ -12,7 +12,7 @@ from core import secrets
 from core.errors import humanise
 from db.database import get_db
 from db.membership import OWNER_ROLES, require_owner, require_workspace
-from toolgrants import registry
+from toolgrants import pool, registry
 
 router = APIRouter(tags=["tools"])
 
@@ -111,6 +111,7 @@ async def connect_tool(body: GrantIn, user=Depends(get_current_user), db=Depends
             doc["config_secret"]["env"] = {k: secrets.encrypt(v) for k, v in secret["env"].items()}
 
     await db.tool_grants.insert_one(doc)
+    await pool.drop(ws["_id"])     # next turn opens a session that includes this
     return {"grant": registry.serialize_grant(doc, for_owner=True)}
 
 
@@ -174,3 +175,4 @@ async def revoke_tool(grant_id: str, user=Depends(get_current_user), db=Depends(
     result = await db.tool_grants.delete_one({"_id": grant_id, "workspace_id": ws["_id"]})
     if result.deleted_count == 0:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No such tool connection")
+    await pool.drop(ws["_id"])     # revocation takes effect on the next turn, not the next restart
