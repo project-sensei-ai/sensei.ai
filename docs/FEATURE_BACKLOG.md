@@ -1,6 +1,75 @@
-# Feature backlog — what would make this outstanding
+# Feature backlog
 
-Written for: the Sensei team, as the master list to pick from.
+Written for: the Sensei team.
+
+**Status as of 2026-09-13.** Tier 1 is complete — the agent now does four things
+without being asked. Most of Tier 2 and half of Tier 3 are done. What remains is
+listed honestly below, including the things only the owner can unblock.
+
+## Done
+
+| | Feature | Where it lives |
+|---|---|---|
+| 1.1 | Onboarding brief | `agent/brief.py`, `/brief` |
+| 1.2 | Gap hunter + drafting | `agent/gaps.py`, `/gaps` |
+| 1.3 | Change watch, with a silence condition | `agent/watch.py`, dashboard |
+| 1.4 | Answer ledger | `answers/`, `/answers` |
+| 1.5 | Sources re-read on a schedule | `agent/watch.py` |
+| 2.1 | Trust & access page | `trust/`, `/trust` |
+| 2.2 | Coverage report | folded into `/trust` |
+| 2.6 | Credentials encrypted at rest | `core/secrets.py` |
+| 3.1 | Multi-agent `Graph` | brief and gap research |
+| 3.2 | Typed artifacts via `structured_output` | briefs, gap reports, verdicts |
+| 3.3 | Streaming answers | `POST /api/chat/.../stream` |
+| 3.4 | Tool calls narrated live | same endpoint |
+| 4.1 | Impact metrics | dashboard + `/answers` |
+| 5.1 | Activity timeline | `activity/`, dashboard |
+| 5.5 | False documentation claims removed | `ARCHTECTRUE.md` |
+| — | 33 unit tests + 7 browser journeys | `backend/tests/` |
+| — | Provider failures translated into sentences | `core/errors.py` |
+
+## Blocked on someone other than the code
+
+| | What | Who |
+|---|---|---|
+| Deployment | The app is single-origin and container-ready; `fly.toml` and `DEPLOY.md` are written. It has never been deployed. | needs a cloud account |
+| Container build | The Dockerfile is checked statically and both build steps succeed natively. Docker is not installed here, so the image has never been built. | needs Docker |
+| Bedrock | Credentials reach it and the code path works. The AWS account has not been granted model access — one console invoke. | needs the AWS console |
+| Teams | The channel abstraction and the speak-or-stay-quiet rule are built and tested. No transport is connected. | needs an M365 tenant |
+
+---
+
+## Still worth building
+
+Ordered by what each buys.
+
+| # | Feature | Why | Effort |
+|---|---|---|---|
+| 2.7 | **Per-item ACL filtering** | The largest remaining gap between what the product promises and what it does. Every member of a project currently sees the same corpus; access is enforced at the project boundary, not per document. PRD FR-7. | 5–6h |
+| 4.2 | **Person graph** | "What did Ramesh change in repo X" is unanswerable without resolving a name to a GitHub login, an Atlassian account and an email. An entire class of question. | 4–5h |
+| 1.6 | **Freshness in answers** | "per PROJ-412, synced 4 minutes ago". The difference between a status answer being trusted and being checked. | 2h |
+| 4.3 | **Eval harness** | A golden question set re-run on every retrieval change. Quality rots silently otherwise — it already did once, when 2000-character chunks were half-invisible to a 256-token embedder and nobody noticed for weeks. | 3h |
+| 2.3 | **Scope preview before granting** | Show what a connector would expose *before* the owner confirms. Consent that is not informed is not consent. | 2–3h |
+| 2.5 | **Expiring grants** | 90-day re-attestation. One feature that makes a security review easy to pass. | 1–2h |
+| 3.5 | **Bedrock AgentCore** | Named in the rules as strengthening Technical Implementation. | 3–4h |
+
+## Connectors, and which are actually worth it
+
+Not all connectors are equal, and the rule that decides it is simple: **never
+ship one that cannot tell you who is allowed to see each item.** A connector
+without ACLs poisons the permission model for every other one.
+
+| Connector | Verdict |
+|---|---|
+| **Teams** | Highest value, most setup. Built except the transport. Use resource-specific consent so the team owner's install *is* the grant — it matches the model everything else here follows. Tenant-wide access needs Microsoft's protected-API approval, roughly a week. |
+| **Jira** | Nearly free once Confluence exists — same site, same account, same token, a different endpoint. Answers "what's the status of PROJ-412", which no document can. Currently a colleague's. |
+| **Slack** | A bot reads only channels it was invited to, which is the cleanest consent story of any connector: the invite is the grant, and removing the bot is the revocation. Currently a colleague's. |
+| **GitHub App** (replacing the PAT) | The biggest security improvement available. Per-repo install, short-lived tokens, webhooks for free, and collaborator lists that make 2.7 possible. It closes the gap between ceiling and floor almost entirely. |
+| **ServiceNow** | The differentiator for IT-services teams, where no single vendor's native AI can see across the client's ITSM and the vendor's Jira. Table API plus ACL evaluation. |
+| **Google Drive / SharePoint** | Where documents actually live in most companies, and the most expensive to do properly — OAuth plus per-file ACL sync. Worth it only after 2.7 exists to use the ACLs. |
+| **Notion** | Cheap, and the only connector where the ceiling equals the floor: an integration sees nothing until a human shares a page with it. A good story, a smaller audience. |
+
+---
 
 Effort is build time for one person who knows the codebase. "Criterion" maps to
 the five equally-weighted judging criteria in `docs/HACKATHON.md` §5.
