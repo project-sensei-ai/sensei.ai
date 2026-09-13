@@ -31,7 +31,9 @@ what only the owner of the AWS account can unblock.
 | **7.1** | **Meeting companion — answer / correct / silent, with reasons** | `meetings/listener.py`, `/meetings` |
 | **7.2** | **Google Meet bot — captions in, chat replies out** | `meetings/meet_bot.py` |
 | **7.3** | **Meeting notes, typed and indexed; transcripts excluded from claim checks** | `meetings/routes.py`, `agent/tools.py` |
-| — | Model fallback chain on daily quota | `agent/agent.py` |
+| **6.8** | **Sign-in tool connections (MCP OAuth 2.1, dynamic client registration)** | `toolgrants/oauth.py` |
+| **8.1** | **Onboarding as a conversation** | `frontend/src/pages/Onboarding.tsx` |
+| — | Provider chain: Groq → Cerebras → Gemini → OpenRouter, per-model quota routing | `agent/agent.py` |
 | — | Two demo projects built through the API | `scripts/seed_confluence.py`, `scripts/seed_apollo.py` |
 | — | 48 unit tests + 7 browser journeys | `backend/tests/` |
 
@@ -41,8 +43,8 @@ what only the owner of the AWS account can unblock.
 |---|---|---|
 | Deployment | `deploy/launch-ec2.sh` is one command to a public HTTPS URL. It has not been run from this machine: creating AWS resources was refused by the environment's policy. | run it from a laptop with AWS credentials |
 | Bedrock | The account's root credentials cannot call Bedrock at all (AWS refuses root for model invocation). An IAM user or instance role with `bedrock:InvokeModel` is needed; the code path and model ids are ready. | the AWS console, five minutes |
-| Groq quotas | The free tier's daily caps were hit twice during testing. The fallback chain routes around a capped model, but a paid key or Bedrock is the safe choice for judging week. | a Groq plan, or the Bedrock IAM user |
-| Meet bot verification | Written against Meet's current markup and the caption-pane selectors seen in 2025 builds; the join flow needs a real Meet with a host to admit it. Every step reports to the page so a failure is visible. | a test call with two people |
+| Groq quotas | The free tier's daily caps were hit on both gpt-oss models during testing. The chain now routes to Cerebras, Gemini or OpenRouter when a key is present — none is set yet. | a free Cerebras or Gemini key in `.env` |
+| Meet bot | Tested against a real call: Meet drops a guest's request made before the host arrives, throttles repeated anonymous attempts, and never surfaced the headless guest's knock to the host. Companion mode is the dependable path; a Workspace meeting with Open access is the configuration to try next. | a Workspace-hosted Meet |
 | Jira on the demo site | The Atlassian site behind the demo has Confluence only. The live tools say so. | enable Jira on the site (free) |
 | Teams | Channel abstraction and speak-or-stay-quiet rule exist; no transport. | an M365 tenant |
 
