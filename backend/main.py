@@ -170,7 +170,9 @@ if (_static / "index.html").is_file():
         candidate = (_static / full_path).resolve()
         if full_path and candidate.is_file() and candidate.is_relative_to(_static.resolve()):
             return FileResponse(candidate)
-        return FileResponse(_static / "index.html")
+        # The shell must never be cached: hashed assets can be, but a stale
+        # index.html keeps pointing at an old bundle after every rebuild.
+        return FileResponse(_static / "index.html", headers={"Cache-Control": "no-store, must-revalidate"})
 
     print(f"[SPA] Serving built frontend from '{_static}'")
 else:
