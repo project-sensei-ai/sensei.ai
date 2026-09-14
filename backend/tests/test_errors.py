@@ -45,3 +45,9 @@ def test_an_unrecognised_failure_is_still_shown():
 
 def test_empty_falls_back():
     assert humanise("") == "Something went wrong."
+
+
+def test_a_malformed_report_is_a_sentence_not_a_pydantic_dump():
+    from core.errors import humanise
+    msg = humanise("4 validation errors for ReadinessGrades\ngrades.0.answer\n  Input should be a valid string [type=string_type]")
+    assert "expected shape" in msg and "pydantic" not in msg and "grades.0" not in msg
