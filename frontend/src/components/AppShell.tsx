@@ -26,6 +26,7 @@ import {
   useSetPasswordMutation,
 } from '@/services/authApi'
 import { useTheme } from '@/components/ThemeProvider'
+// import { BrandLogo } from '@/components/BrandLogo'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
@@ -229,9 +230,6 @@ function AppSidebar() {
               <a href="/">
                 <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold">
                   S
-                </span>
-                <span className="truncate font-semibold group-data-[collapsible=icon]:hidden">
-                  Sensei
                 </span>
               </a>
             </SidebarMenuButton>

@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { SenseiAvatar } from '@/components/SenseiAvatar'
+import { BrandLogo } from '@/components/BrandLogo'
 import TeamPanel from '@/components/TeamPanel'
 import { useGetMeQuery } from '@/services/authApi'
 import {
@@ -207,8 +208,7 @@ export default function Onboarding() {
     <div className="flex min-h-svh flex-col bg-background">
       <header className="flex items-center justify-between border-b px-6 py-3">
         <div className="flex items-center gap-2.5">
-          <SenseiAvatar size="sm" />
-          <span className="text-sm font-semibold">Sensei</span>
+          <BrandLogo className="h-9 w-auto" />
           <Badge variant="secondary" className="text-[10px]">joining your team</Badge>
         </div>
         {user && <span className="text-xs text-muted-foreground">Setting up as <strong>{user.email}</strong></span>}

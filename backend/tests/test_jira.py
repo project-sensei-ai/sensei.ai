@@ -234,3 +234,29 @@ async def test_fetch_jira_falls_back_to_board_when_search_is_gone(monkeypatch):
         email="a@b.com", api_token="x", project_key="eng",
     )
     assert [d["metadata"]["title"] for d in docs] == ["ENG-1: Fix login", "ENG-2: Add logout"]
+
+
+# ── A pasted address is cut back to the site ─────────────────────────────────
+
+import pytest as _pytest
+from pydantic import ValidationError as _ValidationError
+
+
+def _site(url: str) -> str:
+    return JiraSourceIn(type="jira", base_url=url, email="a@b.c", api_token="t", project_key="KAN").base_url
+
+
+def test_cloud_addresses_reduce_to_the_site_root():
+    assert _site("https://acme.atlassian.net/jira/software/projects/KAN/boards/1") == "https://acme.atlassian.net"
+    assert _site("https://acme.atlassian.net/wiki/spaces/SD/overview") == "https://acme.atlassian.net"
+    assert _site("https://acme.atlassian.net/browse/KAN-12?focusedCommentId=1") == "https://acme.atlassian.net"
+    assert _site("https://acme.atlassian.net/") == "https://acme.atlassian.net"
+
+
+def test_self_hosted_jira_keeps_its_context_path():
+    assert _site("https://jira.example.com/jira/browse/OPS-7") == "https://jira.example.com/jira"
+
+
+def test_project_key_is_required():
+    with _pytest.raises(_ValidationError):
+        JiraSourceIn(type="jira", base_url="https://acme.atlassian.net", email="a@b.c", api_token="t", project_key="")
