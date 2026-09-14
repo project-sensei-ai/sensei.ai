@@ -20,6 +20,7 @@ from core.config import settings
 from db.database import ensure_indexes
 from ingest.routes import router as ingest_router
 from meetings.routes import router as meetings_router
+from readiness.routes import router as readiness_router
 from sources.routes import router as sources_router
 from toolgrants.routes import router as tools_router
 from trust.routes import router as trust_router
@@ -142,6 +143,7 @@ app.include_router(watch_router, prefix=f"{API_PREFIX}/watch")
 app.include_router(tools_router, prefix=f"{API_PREFIX}/tools")
 app.include_router(artifacts_router, prefix=f"{API_PREFIX}/artifacts")
 app.include_router(meetings_router, prefix=f"{API_PREFIX}/meetings")
+app.include_router(readiness_router, prefix=f"{API_PREFIX}/readiness")
 
 
 def _health() -> dict:

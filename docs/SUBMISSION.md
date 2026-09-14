@@ -31,8 +31,12 @@ project, and accounts on the tools the team uses — connected as MCP servers
 with the owner's own credential. Then the owner adds their team, and Sensei
 goes to work for them.
 
-**What it does on its own.** When a teammate is added, Sensei researches the
-project and writes them a cited onboarding brief before they first log in.
+**What it does on its own.** Once the sources settle it interviews itself:
+it writes the eight questions a new joiner would ask this project, answers
+each from the sources alone, and grades itself — "ready for 5 of 8", with the
+three it failed already in the ledger for a human to close once. When a
+teammate is added, Sensei researches the project and writes them a cited
+onboarding brief before they first log in.
 When a source lands, it audits what the project *failed* to document and
 offers to draft the missing pages. It re-reads sources on a schedule and
 speaks only when something material changed. Questions it cannot answer go
@@ -83,7 +87,7 @@ Maya (owner) and Priya (member). Rehearse; do not narrate errors.
 | 0:00–0:25 | Title card, then the Confluence team-directory page with "notify-service: no named owner" | "Every team has one person everyone interrupts. Sensei is that person — onboarded like a hire, not prompted like a bot." |
 | 0:25–0:55 | Register as a new owner: the **onboarding conversation** — name the project, connect the repo, then **Sign in with Atlassian** → the Atlassian consent page → back: "Atlassian is connected — 22 things I can look up and 10 I could change, which stay off until you say so" | "Onboarding is a conversation. Maya gives it what she'd give a new hire: the repo, and an account — she signs in, Sensei gets a token. Every tool is classified read or write. Writes are off until she says otherwise." |
 | 0:55–1:20 | **Dashboard → Team**: add priya@apollo.demo. Cut to Priya's first login: her **brief** already written, cited, with "What nobody wrote down" | "Then she adds Priya. Nobody asks Sensei anything. It researches the project for Priya and writes her a brief — waiting when she first logs in. The last section is the honest one: what the sources cannot tell her." |
-| 1:20–1:45 | **Gaps**: eight gaps, three with "Write it for me"; click one, show the draft and the amber "verify these" panel | "It audits its own knowledge and says what nobody wrote down. Where the sources can support it, it drafts the page — and flags every line it inferred." |
+| 1:20–1:45 | **Dashboard**: the readiness card — "Ready for 5 of 8 first-week questions", open the list, the ✗ ones marked "not in the sources", then **Answers** showing them in the ledger asked by "Sensei (self-check)" | "Before it starts, it interviews itself: the questions a new hire would ask, answered from the sources alone, graded honestly. What it fails goes to the ledger — a human answers once, and it knows forever. Then **Gaps**: what nobody wrote down, drafted where the sources allow." |
 | 1:45–2:35 | **Chat** as Priya: "What did Daniel change recently?" → who_did_what narration → cited answer. Then "Put the open issues and PRs in a spreadsheet" → tool trail: GitHub list issues → list PRs → building the spreadsheet → download chip; open the .xlsx | "Ask it like a colleague. Who did what comes from commits and PRs, not prose. Ask for a spreadsheet and it uses the GitHub tools, then hands you the file." |
 | 2:35–3:00 | Chat: "Create an issue for the notify-service owner gap" → tool trail shows the write attempt → the refusal sentence. Cut to Maya's Tools page, flip "Allow writes", back to Priya, retry → issue created, link shown | "It tried to create the issue and was refused — inside the agent loop, not by a prompt. Maya allows writes. Now it does it, because a person asked." |
 | 3:00–3:50 | **Meetings**, companion mode, mic on. Ravi (you, second voice) says "we deploy to us-east-1". Sensei stays quiet. Then "the primary database is DynamoDB" → correction bubble with 0.9 and the ADR cited. Then "Sensei, who's on call next week?" → spoken answer. End meeting → notes with decisions | "In a meeting it listens. A wrong claim that the docs contradict gets a correction — with the source, only above 0.8 confidence. Addressed by name, it answers. When the call ends, it writes the notes and indexes them." |

@@ -205,7 +205,7 @@ export interface LedgerStats {
 
 export interface ActivityEvent {
   at: string | null
-  kind: 'brief' | 'audit' | 'draft' | 'source'
+  kind: 'brief' | 'audit' | 'draft' | 'source' | 'readiness'
   title: string
   detail: string
   /** True when the agent started this itself, rather than a person asking. */
@@ -310,6 +310,24 @@ export interface Meeting {
   replies?: MeetingReply[]
   summary?: string | null
   source_id?: string | null
+}
+
+export interface ReadinessItem {
+  question: string
+  why: string
+  answerable: boolean
+  answer: string
+  source: string
+}
+
+export interface Readiness {
+  status: 'running' | 'ready' | 'error'
+  score: number
+  total: number
+  items: ReadinessItem[]
+  error_message: string | null
+  refresh_error?: string | null
+  updated_at: string | null
 }
 
 export interface ChatCitation {
@@ -561,6 +579,16 @@ const onboardingApi = api.injectEndpoints({
       invalidatesTags: ['Tool'],
     }),
 
+    getReadiness: builder.query<{ readiness: Readiness | null }, void>({
+      query: () => '/readiness',
+      providesTags: ['Readiness'],
+    }),
+
+    rerunReadiness: builder.mutation<{ message: string }, void>({
+      query: () => ({ url: '/readiness/run', method: 'POST' }),
+      invalidatesTags: ['Readiness', 'Activity', 'Answer'],
+    }),
+
     getArtifacts: builder.query<{ artifacts: Artifact[] }, void>({
       query: () => '/artifacts',
       providesTags: ['Artifact'],
@@ -666,6 +694,8 @@ export const {
   useGetOAuthPresetsQuery,
   useStartOAuthMutation,
   useGetArtifactsQuery,
+  useGetReadinessQuery,
+  useRerunReadinessMutation,
   useListMeetingsQuery,
   useGetMeetingQuery,
   useStartMeetingMutation,

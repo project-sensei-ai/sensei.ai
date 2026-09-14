@@ -34,6 +34,7 @@ what only the owner of the AWS account can unblock.
 | **7.3** | **Meeting notes, typed and indexed; transcripts excluded from claim checks** | `meetings/routes.py`, `agent/tools.py` |
 | **6.8** | **Sign-in tool connections (MCP OAuth 2.1, dynamic client registration)** | `toolgrants/oauth.py` |
 | **8.1** | **Onboarding as a conversation** | `frontend/src/pages/Onboarding.tsx` |
+| **9.1** | **Self-interview: readiness score, failures into the ledger** | `agent/readiness.py`, dashboard |
 | — | Provider chain: Groq → Cerebras → Gemini → OpenRouter, per-model quota routing | `agent/agent.py` |
 | — | Two demo projects built through the API | `scripts/seed_confluence.py`, `scripts/seed_apollo.py` |
 | — | 48 unit tests + 7 browser journeys | `backend/tests/` |

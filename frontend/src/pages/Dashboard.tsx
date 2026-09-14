@@ -13,6 +13,8 @@ import {
   useGetMyWorkspaceQuery,
   useGetLedgerQuery,
   useGetTrustQuery,
+  useGetReadinessQuery,
+  useRerunReadinessMutation,
 } from '@/services/onboardingApi'
 import { SenseiAvatar } from '@/components/SenseiAvatar'
 import {
@@ -68,6 +70,77 @@ const overviewCards = [
     ownerOnly: false,
   },
 ]
+
+/**
+ * The self-interview. The only score on the dashboard Sensei gave itself —
+ * and the two questions it failed are the most useful thing on the page.
+ */
+function ReadinessCard({ isOwner }: { isOwner: boolean }) {
+  const { data } = useGetReadinessQuery(undefined, { pollingInterval: 8000 })
+  const [rerun, { isLoading }] = useRerunReadinessMutation()
+  const [open, setOpen] = useState(false)
+  const r = data?.readiness
+  if (!r) return null
+  const missing = r.items.filter((i) => !i.answerable)
+  const pct = r.total ? Math.round((r.score / r.total) * 100) : 0
+  return (
+    <Card className={r.status === 'running' ? 'border-dashed' : ''}>
+      <CardHeader className="pb-2">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-baseline gap-1">
+            <span className="text-3xl font-semibold tabular-nums">{r.status === 'running' && !r.total ? '…' : r.score}</span>
+            <span className="text-sm text-muted-foreground">of {r.total || '?'}</span>
+          </div>
+          <div className="min-w-0 flex-1">
+            <CardTitle className="text-base">
+              {r.status === 'running' ? 'Sensei is interviewing itself' : `Ready for ${pct}% of a new joiner's first-week questions`}
+            </CardTitle>
+            <CardDescription>
+              {r.status === 'running'
+                ? 'Writing the questions a new joiner would ask, then trying to answer them from the sources alone.'
+                : missing.length
+                ? `${missing.length} it could not answer from the sources. They are in the ledger — answer each once and it knows forever.`
+                : 'It could answer all of them from the sources. Nothing to close.'}
+            </CardDescription>
+          </div>
+          <Badge variant="secondary" className="h-5 text-[10px]">on its own</Badge>
+        </div>
+      </CardHeader>
+      {r.items.length > 0 && (
+        <CardContent className="flex flex-col gap-2 pt-0">
+          <button className="self-start text-xs text-muted-foreground underline-offset-2 hover:underline" onClick={() => setOpen((o) => !o)}>
+            {open ? 'Hide the questions' : 'See the questions it asked itself'}
+          </button>
+          {open && (
+            <ul className="flex flex-col gap-1.5">
+              {r.items.map((i) => (
+                <li key={i.question} className="flex gap-2 text-sm">
+                  <span className={`mt-0.5 shrink-0 ${i.answerable ? 'text-green-600' : 'text-amber-600'}`}>{i.answerable ? '✓' : '✗'}</span>
+                  <span className="min-w-0">
+                    <span>{i.question}</span>
+                    {i.answerable && i.source && <span className="ml-1 text-xs text-muted-foreground">[{i.source}]</span>}
+                    {!i.answerable && <span className="ml-1 text-xs text-amber-600">not in the sources</span>}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="flex flex-wrap items-center gap-3">
+            {missing.length > 0 && (
+              <Button asChild size="sm" variant="outline"><Link to="/answers">Close them in the ledger</Link></Button>
+            )}
+            {isOwner && (
+              <Button size="sm" variant="ghost" disabled={isLoading || r.status === 'running'} onClick={() => rerun()}>
+                {isLoading ? 'Starting…' : 'Interview again'}
+              </Button>
+            )}
+            {r.refresh_error && <span className="text-xs text-muted-foreground">Last re-run did not complete — {r.refresh_error}</span>}
+          </div>
+        </CardContent>
+      )}
+    </Card>
+  )
+}
 
 function SetPasswordBanner() {
   const [setPassword, { isLoading }] = useSetPasswordMutation()
@@ -220,6 +293,8 @@ export default function Dashboard() {
           </Card>
         </Link>
       )}
+
+      <ReadinessCard isOwner={isOwner} />
 
       {/* The number the product is judged on, rather than buried three screens
           deep on the page that produces it. */}

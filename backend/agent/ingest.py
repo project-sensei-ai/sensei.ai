@@ -181,6 +181,14 @@ async def write_source_docs(db, chroma_client, source_id: str, raw_docs: list[di
     except Exception as exc:
         print(f"[gaps] post-ingest audit skipped: {exc}")
 
+    # Then it interviews itself: can it actually answer what a new joiner will
+    # ask? What it cannot goes to the ledger before anyone has to hit the gap.
+    try:
+        from agent.readiness import run_readiness
+        await run_readiness(db, chroma_client, source["workspace_id"])
+    except Exception as exc:
+        print(f"[readiness] post-ingest self-check skipped: {exc}")
+
 
 async def run_ingestion(db, chroma_client, source_id: str) -> None:
     """Fetch content for a source, chunk it, and upsert into ChromaDB."""

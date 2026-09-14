@@ -29,6 +29,7 @@ Agents for Humans hackathon, Professional Agents track.
 | **Gap hunter** | When a source lands, the agent audits its own knowledge for what is *absent*: documents that should exist, components with no owner, references that go nowhere. Where the sources can support it, it drafts the missing page and flags every line it inferred. |
 | **Change watch** | It re-reads sources on a schedule, diffs them, and decides whether anything *material* moved. A typo: silence. A runbook deleted: a digest, and every brief written against the old state marked stale. |
 | **Answer ledger** | A question it could not ground is recorded. An owner answers once; it is indexed, and the agent answers it for everyone from then on. |
+| **Self-interview** | Once the sources settle, it writes the eight questions a new joiner would ask *this* project, tries to answer each from the sources alone, and grades itself: "ready for 5 of 8". The ones it fails go into the ledger before any person hits the gap. Two model calls; the honest number on the dashboard. |
 
 ### When asked
 

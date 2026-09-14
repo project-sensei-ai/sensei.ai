@@ -59,6 +59,12 @@ items — and the meeting is a source. Ask in chat: *What was said about the
 deployment region in the architecture review?* It cites the meeting, and it
 reports the correction, not just the wrong claim.
 
+**Dashboard.** The readiness card: Sensei interviewed itself after the
+sources landed — the questions a new joiner would ask, answered from the
+sources alone, graded strictly. Open the list; the ones marked "not in the
+sources" are already in **Answers**, asked by "Sensei (self-check)". Answer one
+in a sentence and re-run the interview: the score moves.
+
 **Trust.** The credential ceilings, the tools by class, the write switch, and
 the "never" list — which changed wording when writes were allowed, because it
 has to stay true.

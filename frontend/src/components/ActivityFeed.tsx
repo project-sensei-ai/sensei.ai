@@ -1,4 +1,4 @@
-import { FileWarning, PenLine, Database, Sparkles, Loader2 } from 'lucide-react'
+import { FileWarning, PenLine, Database, Sparkles, Loader2, ClipboardCheck } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { useGetActivityQuery, type ActivityEvent } from '@/services/onboardingApi'
 
@@ -7,6 +7,7 @@ const ICON = {
   audit: FileWarning,
   draft: PenLine,
   source: Database,
+  readiness: ClipboardCheck,
 } as const
 
 function when(iso: string | null): string {
