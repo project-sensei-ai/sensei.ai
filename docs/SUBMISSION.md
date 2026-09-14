@@ -108,7 +108,7 @@ Maya (owner) and Priya (member). Rehearse; do not narrate errors.
 
 ## Judge instructions (paste into "Testing instructions")
 
-Live: https://34-229-232-67.sslip.io (see `TESTING.md` in the repo). Two projects, two owners:
+Live: https://54-80-119-54.sslip.io (see `TESTING.md` in the repo). Two projects, two owners:
 
 - `judge@sensei.demo` / `Demo-miwVU8NczE6N` — owns **Sensei Demo Project**
   (this codebase's own documentation).
