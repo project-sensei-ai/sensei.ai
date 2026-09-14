@@ -114,8 +114,9 @@ Stated so nothing in the demo is mistaken for more than it is.
   rule are written and tested; no transport is connected.
 - **Per-item ACLs** — visibility is per source per member, not per document.
 - **Jira on the sample site** — the Atlassian site used for the demo has
-  Confluence but not Jira, so the live Jira tools report exactly that. Connect
-  a site with Jira and they light up.
+  Confluence but not Jira. Adding it as a Jira source says exactly that, and
+  the live Jira tools report it too. Paste any board, ticket or Confluence
+  address from a site with Jira and the connection check trims it to the site.
 
 ## 6. Running it locally
 
