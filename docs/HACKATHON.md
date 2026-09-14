@@ -60,7 +60,11 @@ Every item below is required — missing any risks disqualification:
 Publish build-journey posts on **builder.aws.com** with "**Agents for Humans**" in the title.
 - 0.2 points each, max 3 posts (+0.6). Final scores range 1–5.6.
 - Must be **publicly published before the submission deadline**.
-- Plan: publish 2–3 short posts across the final two weeks (setup journey, Strands tool design, deployment story).
+- Published (Sep 15, 2026, before the deadline):
+  - Charan: [onboarding an agent like a hire, with tool grants in Strands](https://builder.aws.com/content/3JKjI1pG1DsRQnkYMwu0XmjO2qT/agents-for-humans-onboarding-an-agent-like-a-hire-with-tool-grants-in-strands)
+  - Charan: [teaching an agent when to stay quiet](https://builder.aws.com/content/3JKjbIP3vUSU5WIEXObxvGhTIFN/agents-for-humans-teaching-an-agent-when-to-stay-quiet)
+  - Aditya: [building a teammate that starts before you ask](https://builder.aws.com/post/3JKLqLTGT93aP1sLplC0xoasNZk_p/agents-for-humans-building-a-teammate-that-starts-before-you-ask)
+  - Aditya: [the hackathon teammate that works without being asked](https://builder.aws.com/post/3JKM17PLnnPDW2MqCntNa7J50Cv_p/agents-for-humans-the-hackathon-teammate-that-works-without-being-asked)
 
 ---
 
