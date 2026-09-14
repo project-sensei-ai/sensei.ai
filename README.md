@@ -129,7 +129,7 @@ is one command from a laptop with AWS credentials to a running instance.
 ### Tests
 
 ```bash
-cd backend && python -m pytest -q            # 84 tests, no model calls, ~0.4s
+cd backend && python -m pytest -q            # 88 tests, no model calls, ~0.5s
 
 # browser journeys, against a running server
 E2E_OWNER_PASSWORD=... python -m pytest tests/e2e -q
@@ -141,7 +141,9 @@ E2E_OWNER_PASSWORD=... python -m pytest tests/e2e -q
 
 **Equipping the agent.** Before the model runs, Sensei searches the sources
 for the question and hands the passages over with it, so most questions are
-answered in a single model call instead of three. Every turn builds a
+answered in a single model call instead of three. That search also runs
+without tool names like "Confluence", which otherwise pull in pages about the
+tool itself, and no single page takes more than two places. Every turn builds a
 `Colleague`: the index tools,
 the live Jira tools when an Atlassian credential exists, the work tools, and
 up to eight connected tools the question actually touches — a server like
@@ -205,7 +207,7 @@ backend/
 ├── core/           config · security · secrets · mailer · errors
 ├── db/             membership.py is the single access rule
 ├── scripts/        seed_confluence.py · seed_apollo.py — the demo projects, built through the API
-└── tests/          84 unit tests + 7 browser journeys
+└── tests/          88 unit tests + 7 browser journeys
 frontend/src/pages/ Dashboard · Brief · Gaps · Answers · Trust · Sources · Tools · Meetings · Chat
 deploy/             docker-compose.prod.yml · Caddyfile · launch-ec2.sh
 ```
