@@ -10,12 +10,16 @@ they ask, when they ask, and in the room with them.
 Built on the [Strands Agents SDK](https://strandsagents.com/). Entered in the
 Agents for Humans hackathon, Professional Agents track.
 
+**Live demo:** https://54-80-119-54.sslip.io — log in with the accounts in
+[TESTING.md](TESTING.md); a real sample project is already onboarded.
+
 ![Architecture](docs/assets/architecture.png)
 
 - **[TESTING.md](TESTING.md)** — two demo projects, two owners, what to try
 - **[DEPLOY.md](DEPLOY.md)** — one container on AWS with HTTPS, one command
 - **[docs/CONNECTOR_ACCESS.md](docs/CONNECTOR_ACCESS.md)** — what each credential and tool grant actually authorises
 - **[docs/SUBMISSION.md](docs/SUBMISSION.md)** — the pitch, the video script, the judge notes
+- **[docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md)** — the five-minute demo, minute by minute
 
 ---
 
