@@ -131,9 +131,17 @@ cd frontend && npm install && npm run dev    # second terminal
 
 http://localhost:5173. No AWS account needed — `LLM_BACKEND` defaults to Groq.
 
-**Tests:** `cd backend && python -m pytest -q` — 88 tests, no model calls,
+**Tests:** `cd backend && python -m pytest -q` — 108 tests, no model calls,
 under half a second. They cover the judgement: which tools are permitted,
 which are offered, and when the agent speaks in a meeting.
+
+**Plain answers and the thinking stream.** `tests/test_formatting.py` feeds
+`plain_answer` real model output: `**Priya Nair**【1】`, `[Confluence: SD › Apollo — Deployment runbook]`,
+markdown tables, `*(Source: [...])*` trailers, and code such as `items[0]` that must survive.
+By hand: ask a question in Chat and watch the steps tick through ("Reading your question",
+"Searching the project's documents", "Writing the answer"); the answer should show no brackets
+or markers, bold only on the key fact, and a collapsed "Thought for Ns · N steps" line that
+expands to the steps. Under a model limit the only extra step is "Taking a little longer to check".
 
 **Rebuilding the sample project:** `python scripts/seed_confluence.py <ws> SD`
 writes the Apollo pages into a Confluence space; `python scripts/seed_apollo.py`

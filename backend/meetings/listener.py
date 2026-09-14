@@ -20,6 +20,7 @@ The correction gate is deliberately strict. A colleague who corrects people
 on a hunch is asked to leave the call. One who corrects with the page open in
 front of them is the one you wanted in the room.
 """
+from core.formatting import plain_answer
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -101,8 +102,9 @@ def looks_like_an_assertion(text: str) -> bool:
 
 _ANSWER_PROMPT = """You are Sensei, a colleague sitting in this meeting. Someone just said your name
 and asked you something. Answer the way a person would out loud: two to four
-sentences, no headings, no bullet lists, no markdown. Lead with the answer.
-Name the source in plain words ("the architecture doc says…", "per PROJ-412").
+sentences, no headings, no bullet lists, no markdown, no brackets or citation
+markers. Lead with the answer. Name the source in plain words ("the
+architecture doc says…", "per PROJ-412").
 
 The ONLY evidence you may use is the passages below, retrieved from the
 project's own sources. The conversation transcript tells you what was asked
@@ -164,7 +166,7 @@ async def answer_when_addressed(workspace_id: str, chroma_client, text: str, con
     inventory = make_inventory_tool(workspace_id, chroma_client, allowed_sources)
     agent = _agent(_ANSWER_PROMPT.format(context=context or "(none)", passages=passages), [search_tool, inventory])
     result = await agent.invoke_async(question)
-    return Reply(kind="answer", text=str(result).strip(), citations=list(captured),
+    return Reply(kind="answer", text=plain_answer(str(result)), citations=list(captured),
                  confidence=1.0 if captured else 0.5, reason="addressed by name", trigger=text)
 
 
@@ -216,7 +218,7 @@ async def check_claim(workspace_id: str, chroma_client, text: str,
     if not verdict.correction.strip():
         return Reply(kind="silent", reason="contradicted but no correction was produced", trigger=text,
                      confidence=verdict.confidence)
-    return Reply(kind="correction", text=verdict.correction.strip(), citations=list(captured),
+    return Reply(kind="correction", text=plain_answer(verdict.correction), citations=list(captured),
                  confidence=verdict.confidence,
                  reason=f"sources contradict it: {verdict.evidence[:160]}", trigger=text)
 
@@ -238,12 +240,43 @@ class MeetingSummary(BaseModel):
     open_questions: list[str] = Field(default_factory=list, description="Questions raised and not resolved")
 
 
-async def summarise(title: str, transcript: list[dict]) -> MeetingSummary:
-    lines = "\n".join(f"{u.get('speaker', '?')}: {u.get('text', '')}" for u in transcript)
+def fallback_reply(text: str, why: str) -> Reply:
+    """
+    What Sensei says when it could not think about an utterance.
+
+    Staying silent is right for a remark nobody aimed at it. Spoken to by name,
+    silence reads as ignoring a colleague's question, so it says it could not
+    check just now — without the reason, which is plumbing.
+    """
+    if is_addressed(text):
+        return Reply(kind="answer", text="I couldn't check the sources just now. Ask me again in a minute.",
+                     confidence=0.0, reason=f"addressed, but could not answer: {why}", trigger=text)
+    return Reply(kind="silent", reason=f"could not judge it: {why}", trigger=text)
+
+
+def transcript_with_replies(transcript: list[dict], replies: list[dict] | None) -> str:
+    """The meeting as it was heard, with Sensei's answers and corrections where they were spoken."""
+    spoken = {r.get("trigger"): r for r in (replies or [])
+              if r.get("kind") in ("answer", "correction") and r.get("confidence", 1) > 0}
+    lines = []
+    for u in transcript:
+        lines.append(f"{u.get('speaker', '?')}: {u.get('text', '')}")
+        r = spoken.get(u.get("text"))
+        if r:
+            tag = "Sensei (correcting that, from the sources)" if r["kind"] == "correction" else "Sensei (answering, from the sources)"
+            lines.append(f"{tag}: {r.get('text', '')}")
+    return "\n".join(lines)
+
+
+async def summarise(title: str, transcript: list[dict], replies: list[dict] | None = None) -> MeetingSummary:
+    lines = transcript_with_replies(transcript, replies)
     agent = _agent(
         "You write short, factual meeting notes from a transcript. Only record what "
         "was said. Attribute decisions and action items to the people who made them. "
-        "Never invent a decision that was not explicitly agreed."
+        "Never invent a decision that was not explicitly agreed. Lines from Sensei are "
+        "answers and corrections from the project's sources: a question Sensei answered "
+        "is not an open question, and a remark Sensei corrected is not a decision unless "
+        "people explicitly agreed to it after the correction."
     )
     return await agent.structured_output_async(
         MeetingSummary, f"Meeting: {title}\n\nTranscript:\n{lines[:24000]}"

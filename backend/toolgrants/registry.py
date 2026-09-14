@@ -210,6 +210,9 @@ _FILLER = {
 }
 
 
+MIN_RELEVANCE = 2
+
+
 def select_relevant(tools: list, question: str, limit: int, always: set[str] | None = None) -> list:
     """
     The handful of granted tools this question plausibly needs.
@@ -235,7 +238,10 @@ def select_relevant(tools: list, question: str, limit: int, always: set[str] | N
 
     # Only tools the question actually touches. A documentation question
     # should not pay for fifty GitHub schemas it will never call.
-    ranked = sorted((t for t in tools if score(t) >= 1), key=score, reverse=True)
+    # Two meaningful words in common, not one: "python" or "model" in a
+    # question about a README was enough to send three GitHub commit tools'
+    # schemas — about 1,200 tokens — on every call of the turn.
+    ranked = sorted((t for t in tools if score(t) >= MIN_RELEVANCE), key=score, reverse=True)
     keep = [t for t in tools if t.tool_name in always]
     for t in ranked:
         if len(keep) >= limit:

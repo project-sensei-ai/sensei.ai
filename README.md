@@ -154,6 +154,23 @@ already gathered. A quiet spell gets a "still working" notice, and no question
 waits past two and a half minutes.
 MCP sessions are pooled across turns and closed off the event loop.
 
+**Plain answers and the thinking stream.** Answers read like a colleague's chat
+message: plain sentences that lead with the answer, **bold** for the one or two
+facts that matter, and "- " bullets only for three or more parallel items. The
+prompt forbids citation markers, bracketed source labels, tables and headings,
+because the sources are already listed under every answer. `core/formatting.py`
+(`plain_answer`) is the net under the prompt: it strips 【1】, [2] and
+`[Confluence: SD › …]` labels, turns tables into bullets and headings into a bold
+line, and runs on every stored chat answer and every meeting reply. The web
+app's `AnswerText` renderer mirrors it, so streaming text and older messages
+read the same, and renders only paragraphs, lists and bold — no HTML injection.
+While a turn runs, the stream sends steps ("Reading your question", "Searching
+the project's documents", each tool's narration, "Writing the answer"). A model
+resting at its limit, a switch to another model or a slow provider reaches the
+person as one calm step, "Taking a little longer to check", never a model name.
+The steps and the turn's duration are stored on the message, and a finished
+answer shows them folded away as "Thought for 8s · 3 steps".
+
 **The write gate.** `WriteGate` is a Strands `HookProvider` on
 `BeforeToolCallEvent`. A granted tool the owner has not permitted gets
 `cancel_tool` set with a message; the model receives that message as the tool

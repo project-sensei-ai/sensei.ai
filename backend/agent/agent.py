@@ -16,12 +16,24 @@ _EXHAUSTED: dict[str, float] = {}
 _EXHAUSTED_FOR = 3600.0
 
 
-def mark_exhausted(model_id: str | None, seconds: float = _EXHAUSTED_FOR) -> None:
+def limit_kind(exc) -> str:
+    """Which limit a provider error names, for the log: "tokens per day (TPD): Limit 200000, Used 199k"."""
+    text = str(exc or "")
+    m = re.search(r"on ([a-z ]+\([A-Z]+\)): Limit (\d+), Used (\d+), Requested (\d+)", text)
+    if m:
+        return f"{m.group(1)} used {m.group(3)}/{m.group(2)}, asked {m.group(4)}"
+    m = re.search(r"(tokens per day|tokens per minute|requests per (?:day|minute)|Request too large)", text, re.I)
+    wait = re.search(r"try again in ([\dhms.]+)", text)
+    return " ".join(x for x in ((m.group(1) if m else type(exc).__name__), (f"retry in {wait.group(1)}" if wait else "")) if x)
+
+
+def mark_exhausted(model_id: str | None, seconds: float = _EXHAUSTED_FOR, why=None) -> None:
     """Bench a model: an hour for a daily cap, about a minute for a per-minute limit."""
     if model_id:
         _EXHAUSTED[model_id] = time.time() + seconds
         span = "an hour" if seconds >= 3600 else f"{int(seconds)}s"
-        print(f"[models] {model_id} is at its limit — routing around it for {span}")
+        reason = f" ({limit_kind(why)})" if why is not None else ""
+        print(f"[models] {model_id} is at its limit — routing around it for {span}{reason}")
 
 
 def _usable(model_id: str) -> bool:
@@ -56,6 +68,30 @@ _OUTPUT_CAPS = {"qwen/qwen3.8-27b": 900, "qwen/qwen3.6-27b": 900}
 CHAT_OUTPUT_TOKENS = 2000
 
 
+# Groq's Qwen models think out loud before answering, and every thinking token
+# comes out of the same 900-token output budget: a turn could spend it all
+# reasoning and fail before writing a word, and what reasoning did reach the
+# answer arrived wrapped in </think>. Chat does not need it; switched off.
+_NO_REASONING = {"reasoning_effort": "none", "reasoning_format": "hidden"}
+
+
+def request_params(model_id: str, background: bool) -> dict:
+    """What goes into every request to this model beyond the messages."""
+    params = {"max_tokens": max_output_tokens(model_id, background)}
+    if model_id.startswith("qwen/"):
+        # Groq-only fields: the OpenAI client refuses unknown keyword arguments,
+        # so they travel in the request body untouched.
+        params["extra_body"] = dict(_NO_REASONING)
+    return params
+
+
+def output_capped(model_id: str | None) -> bool:
+    """A model (bare id or provider/model key) whose output budget is too small for long answers or files."""
+    if not model_id:
+        return False
+    return model_id in _OUTPUT_CAPS or model_id.split("/", 1)[-1] in _OUTPUT_CAPS
+
+
 def max_output_tokens(model_id: str, background: bool) -> int:
     """A chat answer is a few paragraphs; background reports need more room."""
     wanted = settings.MAX_OUTPUT_TOKENS if background else min(settings.MAX_OUTPUT_TOKENS, CHAT_OUTPUT_TOKENS)
@@ -88,6 +124,11 @@ def model_chain(background: bool) -> list[tuple[str, str, str, str]]:
                 # borrowing the chat model's budget is what leaves a person
                 # waiting on a question, so the chat model goes last for it.
                 models = [m for m in models if m != settings.GROQ_MODEL] + [settings.GROQ_MODEL]
+        if background and name == "groq":
+            # Background reports are long structured objects; a model that can
+            # write 900 tokens fails them every time, and each failure spends
+            # the shared per-minute budget chat needs.
+            models = [m for m in models if m not in _OUTPUT_CAPS] or models
         for m in models:
             if m not in [c[3] for c in chain if c[1] == name]:
                 chain.append((f"{name}/{m}", name, base, m))
@@ -141,7 +182,7 @@ def bench_for(exc, background: bool) -> str | None:
     named = model_named_in(exc)
     key = next((e[0] for e in model_chain(background) + model_chain(not background)
                 if named and e[3] == named), None) or pick_model(background)[0]
-    mark_exhausted(key, rest_after(exc))
+    mark_exhausted(key, rest_after(exc), why=exc)
     return key
 
 
@@ -192,16 +233,37 @@ to tools. You think, look things up, do the work, and say plainly what you canno
   clearly ask for. Read freely; write only on request.
 
 ## How to answer
-- Direct and specific. Lead with the answer, then the evidence.
+- Write plain sentences, the way a colleague types in chat. Lead with the answer
+  in the first sentence, then the evidence that matters.
+- Use **bold** only for the one or two key facts a reader is looking for (a name,
+  a date, a window). Most answers need no other formatting.
+- Use simple "- " bullets only for three or more parallel items. Never tables,
+  headings, horizontal rules, emoji or decorative symbols.
+- Never write brackets of any kind around sources, citation markers, reference
+  numbers or footnotes: no [1], no 【1】, no 【1†source】, no [Confluence: ...],
+  no [repo-name], no "(Source: ...)" and no "Sources:" line. The sources are
+  shown under your answer automatically.
+- When a source matters to the answer, name it in words: "the deployment runbook
+  says", "per KAN-12", "Priya said in #all-sensei".
 - Speak about the project, not about your retrieval: never "the search returned…"
-  or "in the results I was given".
-- Cite sources inline by label: [my-repo], [Confluence: ENG], [Jira PROJ-412 live].
-  Never emit numeric or dagger markers such as 【1†source】 or [1].
+  or "in the results I was given", and never name your tools (no
+  "search_project_docs", "who_did_what") in an answer.
+- Copy facts exactly as the source writes them: commands, versions, dates, days,
+  frequencies ("weekly", not "nightly"), amounts and units. Never add a currency
+  or unit the source does not state, and never swap one date in a source for
+  another date near it.
+- Steps, commands and procedures come only from the sources. If the passages
+  show a heading but not the steps under it, search once for them; if they are
+  still missing, say you could not find the steps. Never fill in a plausible
+  command.
+- Write only the answer. No narration of what you are about to do ("let me
+  check…", "I'll fetch…"), and no offers to look something up that you could
+  have looked up.
 - If the sources do not cover it, say so honestly in one sentence. Do not
   fabricate project details, ticket states, owners or decisions.
 - Say how fresh a fact is when it matters: "synced from Confluence", "live from
   Jira just now".
-- Keep it concise; markdown lists or code blocks where they help.
+- Keep it short. Use a code block only for commands or code someone will copy.
 - A purely general question (no project angle) can be answered directly.
 """
 
@@ -263,7 +325,7 @@ def _build_model(background: bool = False, entry: tuple | None = None):
         # A structured report of eight gaps is a lot of tokens in one response,
         # and running out mid-object fails the whole run with
         # "unrecoverable state due to max_tokens limit".
-        params={"max_tokens": max_output_tokens(model_id, background)},
+        params=request_params(model_id, background),
     )
     # So a quota error can be pinned on the exact provider/model that raised it.
     model.sensei_key = key
@@ -312,7 +374,15 @@ class ModelFailover(HookProvider):
         from core.errors import is_quota_error, is_rate_limit_error, retry_after_seconds
 
         exc = event.exception
-        if event.retry or exc is None:
+        if event.retry:
+            return
+        if exc is None:
+            stop = getattr(getattr(event, "stop_response", None), "stop_reason", None)
+            if stop == "max_tokens":
+                await self._outgrew(event)
+            return
+        if _rejects_reasoning_params(exc) and self._drop_reasoning_params(event):
+            event.retry = True
             return
         if not (isinstance(exc, ModelThrottledException) or is_quota_error(exc) or is_rate_limit_error(exc)):
             return
@@ -328,14 +398,15 @@ class ModelFailover(HookProvider):
             return
 
         current = getattr(event.agent.model, "sensei_key", None)
-        mark_exhausted(current, rest_after(exc))
+        mark_exhausted(current, rest_after(exc), why=exc)
 
         entry = next((e for e in model_chain(self.background) if _usable(e[0])), None)
         if entry is None:
             wait = seconds_until_available(self.background)
             if wait is None or wait > self.max_wait_s:
                 return
-            self._tell(f"Every model is at its per-minute limit. Picking up again in {int(wait) + 1} seconds.")
+            print(f"[models] every model is resting; waiting {int(wait) + 1}s")
+            self._tell("Taking a little longer to check")
             await asyncio.sleep(wait + 0.5)
             entry = next((e for e in model_chain(self.background) if _usable(e[0])), None)
             if entry is None:
@@ -346,8 +417,166 @@ class ModelFailover(HookProvider):
             await asyncio.sleep(min(said or 5.0, self.max_wait_s))
         elif entry[0] != current:
             event.agent.model = _build_model(self.background, entry=entry)
-            self._tell(f"{_short(current)} is at its limit, so Sensei moved to {_short(entry[0])}.")
+            print(f"[models] {_short(current)} is resting; moved to {_short(entry[0])}")
+            self._tell("Taking a little longer to check")
         event.retry = True
+
+
+    def _drop_reasoning_params(self, event) -> bool:
+        """A provider that does not know the reasoning switches gets the request without them."""
+        config = getattr(event.agent.model, "config", None)
+        params = (config or {}).get("params") if isinstance(config, dict) else None
+        extra = (params or {}).get("extra_body") or {}
+        if not params or not any(k in extra or k in params for k in _NO_REASONING) or self._moves >= self.max_moves:
+            return False
+        self._moves += 1
+        kept = {k: v for k, v in params.items() if k not in _NO_REASONING and k != "extra_body"}
+        rest = {k: v for k, v in extra.items() if k not in _NO_REASONING}
+        if rest:
+            kept["extra_body"] = rest
+        event.agent.model.update_config(params=kept)
+        print(f"[models] {_short(getattr(event.agent.model, 'sensei_key', '') or '?')} rejected the reasoning switches; retrying without them")
+        return True
+
+    async def _outgrew(self, event) -> None:
+        """
+        The answer ran past this model's output budget. On a model with a small
+        one, the same call goes to a model with room; the half-written response
+        is discarded, so the person never sees it.
+        """
+        if self._moves >= self.max_moves or settings.LLM_BACKEND in ("bedrock", "ollama"):
+            return
+        current = getattr(event.agent.model, "sensei_key", None)
+        if not output_capped(current):
+            return
+        roomy = [e for e in model_chain(self.background) if not output_capped(e[3])]
+        entry = next((e for e in roomy if _usable(e[0])), None)
+        if entry is None and roomy:
+            now = time.time()
+            wait = max(0.0, min(_EXHAUSTED.get(e[0], 0.0) - now for e in roomy))
+            if wait > self.max_wait_s:
+                return
+            self._tell("Taking a little longer to check")
+            await asyncio.sleep(wait + 0.5)
+            entry = next((e for e in roomy if _usable(e[0])), None)
+        if entry is None:
+            return
+        self._moves += 1
+        event.agent.model = _build_model(self.background, entry=entry)
+        print(f"[models] {_short(current)} ran out of room for this answer; moved to {_short(entry[0])}")
+        self._tell("Taking a little longer to check")
+        event.retry = True
+
+
+def _rejects_reasoning_params(exc) -> bool:
+    """A provider (400) or client (unexpected keyword) that does not accept the reasoning switches."""
+    text = str(exc)
+    refused = "400" in text or "BadRequest" in type(exc).__name__ or isinstance(exc, TypeError)
+    return refused and "reasoning" in text.lower()
+
+
+# A live tool can answer with a megabyte of JSON: every issue with its author's
+# avatar URL, node ids, reactions. All of it is re-sent on each model call in
+# the turn, and one GitHub listing was enough to push a request past a
+# free-tier model's per-minute budget. The model needs the fields, not the noise.
+MAX_TOOL_RESULT_CHARS = 4000
+_NOISE_KEY = re.compile(r"(^|_)(url|urls|node_id|avatar|gravatar|reactions|_links|sha|etag|"
+                        r"performed_via_github_app|sub_issues_summary|timeline|events|site_admin|"
+                        r"user_view_type|followers|following|gists|starred|subscriptions|organizations|repos)($|_)",
+                        re.I)
+
+
+def _compact(value, depth: int = 0):
+    import json as _json
+    if isinstance(value, dict):
+        out = {}
+        for k, v in value.items():
+            if _NOISE_KEY.search(str(k)) and str(k) not in ("html_url",):
+                continue
+            if v in (None, "", [], {}):
+                continue
+            if isinstance(v, dict) and depth >= 1 and {"login"} <= set(v):
+                out[k] = v.get("login")                     # a whole user object is one name
+                continue
+            out[k] = _compact(v, depth + 1)
+        return out
+    if isinstance(value, list):
+        return [_compact(v, depth + 1) for v in value]
+    return value
+
+
+def compact_tool_text(text: str, limit: int = MAX_TOOL_RESULT_CHARS) -> str:
+    """A long tool result, with JSON noise removed and the rest cut to size."""
+    import json as _json
+    if len(text) <= limit:
+        return text
+    stripped = text.strip()
+    if stripped[:1] in "[{":
+        try:
+            text = _json.dumps(_compact(_json.loads(stripped)), ensure_ascii=False, separators=(",", ":"))
+        except ValueError:
+            pass
+    if len(text) <= limit:
+        return text
+    return text[:limit].rsplit("\n", 1)[0] + "\n…(cut here: only the first part was kept. Say so if it matters.)"
+
+
+class ToolResultTrimmer(HookProvider):
+    """Keeps a tool's answer to what a model call can carry."""
+
+    def __init__(self, limit: int = MAX_TOOL_RESULT_CHARS):
+        self.limit = limit
+
+    def register_hooks(self, registry: HookRegistry, **kwargs) -> None:
+        from strands.hooks import AfterToolCallEvent
+        registry.add_callback(AfterToolCallEvent, self._after_tool)
+
+    def _after_tool(self, event) -> None:
+        result = event.result or {}
+        blocks = result.get("content") or []
+        changed = False
+        new_blocks = []
+        for block in blocks:
+            text = block.get("text") if isinstance(block, dict) else None
+            if isinstance(text, str) and len(text) > self.limit:
+                block = {**block, "text": compact_tool_text(text, self.limit)}
+                changed = True
+            elif isinstance(block, dict) and "json" in block:
+                import json as _json
+                raw = _json.dumps(block["json"], ensure_ascii=False)
+                if len(raw) > self.limit:
+                    block = {"text": compact_tool_text(raw, self.limit)}
+                    changed = True
+            new_blocks.append(block)
+        if changed:
+            event.result = {**result, "content": new_blocks}
+
+
+# Built-in tools that only some questions need. Their schemas are re-sent on
+# every model call, so a question about the deploy window does not carry the
+# spreadsheet writer or live Jira along with it.
+_WANTS_FILE = re.compile(
+    r"\b(spreadsheet|excel|xlsx|csv|sheet|workbook|tracker|table|word|docx|document|doc|file|"
+    r"handover|hand-over|write[- ]?up|report|memo|notes?|download|export|attach(?:ment|ed)?)\b", re.I)
+_WANTS_JIRA = re.compile(
+    r"(?i:\b(?:jira|tickets?|issues?|bugs?|sprints?|backlog|epics?|stor(?:y|ies)|blockers?|blocked|"
+    r"assigned|assignee|priority|status)\b)|\b[A-Z][A-Z0-9]{1,9}-\d+\b")
+_WANTS_WRITE = re.compile(
+    r"\b(create|open a|file a|raise|add|post|send|comment|reply|update|edit|change|close|reopen|"
+    r"assign|merge|approve|label|delete|remove|move|transition|schedule|invite|publish|push|fork|star)\b",
+    re.I)
+
+
+def wants_file(question: str) -> bool:
+    return bool(_WANTS_FILE.search(question or ""))
+
+
+def wants_jira(question: str) -> bool:
+    return bool(_WANTS_JIRA.search(question or ""))
+
+
+def wants_write(question: str) -> bool:
+    return bool(_WANTS_WRITE.search(question or ""))
 
 
 def _short(key: str) -> str:
@@ -459,8 +688,12 @@ def build_colleague(
     # Sized for free-tier per-minute token budgets: every passage is re-sent on
     # each model call in the turn, so two searches of six short passages keep a
     # whole turn inside one model's budget.
-    search_tool, captured = make_search_tool(workspace_id, chroma_client, n_results=5,
-                                             passage_chars=600, budget=3,
+    # A passage is the whole chunk (800 characters plus its provenance line).
+    # Cut shorter, the end of every chunk was invisible in every search: the
+    # runbook's "Rollback to previous. Takes about 90 seconds" sat past the cut,
+    # and a chunk already shown is never shown again, so no search could reach it.
+    search_tool, captured = make_search_tool(workspace_id, chroma_client, n_results=6,
+                                             passage_chars=1000, budget=3,
                                              allowed_sources=allowed_sources)
     tools = [
         search_tool,
@@ -473,14 +706,16 @@ def build_colleague(
     # Jira rides on whatever Atlassian credential is already connected, but a
     # member the owner has narrowed away from that source should not get it.
     visible = [s for s in sources if allowed_sources is None or s["_id"] in allowed_sources]
-    tools.extend(make_jira_tools(visible))
+    if not question or wants_jira(question):
+        tools.extend(make_jira_tools(visible))
 
     work_tools, produced = make_work_tools(workspace_id, user_id)
-    tools.extend(work_tools)
+    if not question or wants_file(question):
+        tools.extend(work_tools)
 
     narration = dict(BUILTIN_NARRATION)
     failover = ModelFailover()
-    hooks = [failover]
+    hooks = [failover, ToolResultTrimmer()]
     refusals: list = []
     if grants and grant_session is None:
         # Callers normally pass a warm session from toolgrants.pool; opening
@@ -488,7 +723,15 @@ def build_colleague(
         grant_session = GrantSession().open(grants)
     if grant_session is not None:
         limit = max_grant_tools if max_grant_tools is not None else settings.MAX_GRANT_TOOLS_PER_TURN
-        tools.extend(select_relevant(grant_session.tools, question, limit))
+        offered = grant_session.tools
+        if question and not wants_write(question):
+            # A reading question does not need forty write tools' schemas. Asked
+            # to change something, the write tools come back — and the gate
+            # still refuses the ones the owner has not allowed.
+            from toolgrants.registry import classify
+            offered = [t for t in offered if classify(t.tool_name.split("_", 1)[-1],
+                                                      getattr(getattr(t, "mcp_tool", None), "annotations", None)) == "read"]
+        tools.extend(select_relevant(offered, question, limit))
         narration.update(grant_session.narration)
         gate = grant_session.gate(on_refusal=lambda name, g: refusals.append({"tool": name, "grant": g}))
         hooks.append(gate)

@@ -254,7 +254,9 @@ def test_a_throttled_call_moves_to_the_next_model_and_keeps_its_work(monkeypatch
     event, notices = _throttle_once(a, monkeypatch, [("groq/m1", "groq", "u", "m1"), ("groq/m2", "groq", "u", "m2")])
     assert event.retry is True
     assert event.agent.model.sensei_key == "groq/m2"
-    assert notices and "m2" in notices[0]
+    # The person hears one calm line; which model took over is plumbing, kept out of it.
+    assert notices == ["Taking a little longer to check"]
+    assert "m1" not in notices[0] and "m2" not in notices[0]
     assert not a.model_available("groq/m1")
     a._EXHAUSTED.clear()
 

@@ -342,12 +342,21 @@ export interface ChatResponse {
   citations: ChatCitation[]
 }
 
+/** One thing the agent did while answering, and when (ms from the question). */
+export interface ChatStep {
+  label: string
+  ms: number
+}
+
 export interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
   citations?: ChatCitation[]
   artifacts?: Artifact[]
   tools_used?: string[]
+  /** Absent on messages stored before the thinking stream existed. */
+  steps?: ChatStep[]
+  duration_ms?: number | null
   created_at: string
 }
 

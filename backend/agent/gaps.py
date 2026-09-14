@@ -23,7 +23,7 @@ from agent.agent import _build_model
 from agent.tools import make_inventory_tool, make_search_tool
 from agent import usage
 from core.config import settings
-from core.errors import humanise
+from core.errors import humanise, refresh_error
 
 RESCAN_DEBOUNCE = timedelta(minutes=10)
 
@@ -246,7 +246,7 @@ async def scan_gaps(db, chroma_client, workspace_id: str, force: bool = False) -
             {"workspace_id": workspace_id},
             {"$set": {"status": "ready" if has_report else "error",
                       "error_message": None if has_report else humanise(exc),
-                      "refresh_error": humanise(exc) if has_report else None,
+                      "refresh_error": refresh_error(exc) if has_report else None,
                       "updated_at": datetime.now(timezone.utc)}},
         )
         print(f"[gaps] audit failed for {workspace_id}: {exc}")

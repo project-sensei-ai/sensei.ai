@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import {
   Bot, CheckCircle2, ChevronDown, ChevronUp, Loader2, Mic, MicOff, Send, Square, Video, Volume2, VolumeX,
 } from 'lucide-react'
+import { AnswerText, cleanAnswer } from '@/components/AnswerText'
 import { AppShell } from '@/components/AppShell'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -32,7 +33,8 @@ function speak(text: string, enabled: boolean) {
   if (!enabled || typeof window === 'undefined' || !('speechSynthesis' in window)) return
   try {
     window.speechSynthesis.cancel()
-    const u = new SpeechSynthesisUtterance(text)
+    // Spoken, a marker is noise: say the cleaned sentence without bold markers or backticks.
+    const u = new SpeechSynthesisUtterance(cleanAnswer(text).replace(/\*\*|`/g, ''))
     u.rate = 1.02
     window.speechSynthesis.speak(u)
   } catch { /* the page still shows the text */ }
@@ -61,7 +63,7 @@ function ReplyBubble({ r }: { r: MeetingReply }) {
             {correction ? `correction · ${Math.round(r.confidence * 100)}% sure` : 'answered'}
           </Badge>
         </div>
-        <p className="whitespace-pre-wrap">{r.text}</p>
+        <AnswerText text={r.text} />
         {r.citations.length > 0 && (
           <div className="mt-2 border-t pt-2">
             <button className="flex items-center gap-1 text-[11px] font-medium text-muted-foreground hover:text-foreground" onClick={() => setOpen((o) => !o)}>
@@ -314,7 +316,7 @@ function PastMeeting({ m }: { m: Meeting }) {
       <CardContent className="flex flex-col gap-2 text-sm">
         {m.summary ? (
           <>
-            <p>{(m.summary as any).summary}</p>
+            <AnswerText text={(m.summary as any).summary} />
             {((m.summary as any).decisions?.length > 0) && (
               <div><p className="text-xs font-medium text-muted-foreground">Decisions</p>
                 <ul className="list-disc pl-5 text-sm">{(m.summary as any).decisions.map((d: string) => <li key={d}>{d}</li>)}</ul></div>

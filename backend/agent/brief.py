@@ -23,7 +23,7 @@ from strands.multiagent import GraphBuilder
 
 from agent.agent import _build_model
 from core.config import settings
-from core.errors import humanise
+from core.errors import humanise, refresh_error
 from agent.tools import make_inventory_tool, make_search_tool
 from agent import usage
 
@@ -264,7 +264,7 @@ async def generate_brief(db, chroma_client, workspace_id: str, user_id: str) -> 
             {"workspace_id": workspace_id, "user_id": user_id},
             {"$set": {"status": "ready" if has_brief else "error",
                       "error_message": None if has_brief else humanise(exc),
-                      "refresh_error": humanise(exc) if has_brief else None,
+                      "refresh_error": refresh_error(exc) if has_brief else None,
                       "updated_at": datetime.now(timezone.utc)}},
         )
         print(f"[brief] failed for {person}: {exc}")

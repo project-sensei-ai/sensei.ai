@@ -78,12 +78,13 @@ def make_people_tool(workspace_id: str, chroma_client, allowed_sources: list[str
 
         by_type: dict[str, list[str]] = {}
         for dt, label, text in hits[:80]:
-            by_type.setdefault(dt, []).append(f"- [{label}] {text}")
+            by_type.setdefault(dt, []).append(f"- {label}: {text}")
         out = [f"Activity involving '{person}' across {len(hits)} record(s):"]
         for dt, lines in by_type.items():
             out.append(f"\n## {dt.replace('_', ' ')} ({len(lines)})")
             out.extend(lines[:20])
-        out.append("\nCite the source labels in brackets when you report this.")
+        out.append("\nName the source in words when it matters. Report dates, days and "
+                   "frequencies exactly as these records state them.")
         return "\n".join(out)
 
     return who_did_what

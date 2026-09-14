@@ -1,6 +1,7 @@
 """Chat routes — session management + the colleague answering, streamed."""
 import asyncio
 import json
+import re
 import time
 from datetime import datetime, timezone
 from uuid import uuid4
@@ -13,6 +14,8 @@ from agent.agent import build_colleague, make_session_manager
 from answers import store as answer_store
 from artifacts.routes import serialize_artifact
 from auth.deps import get_current_user
+from core.formatting import plain_answer, without_reasoning
+from agent.tools import relevant_citations
 from core.errors import humanise, is_quota_error, is_rate_limit_error, model_named_in
 from agent.agent import mark_exhausted, model_available, pick_model, rest_after
 from db.chroma import get_chroma
@@ -60,8 +63,15 @@ async def _equip(db, chroma, session: dict, user: dict, session_id: str, questio
 
 
 async def _persist_turn(db, session: dict, session_id: str, question: str, answer: str,
-                        citations: list, artifacts: list, user: dict, tools_used: list[str]) -> list[dict]:
-    """Store the exchange, the files it produced, and — if it went unanswered — the question."""
+                        citations: list, artifacts: list, user: dict, tools_used: list[str],
+                        steps: list[dict] | None = None, duration_ms: int | None = None) -> list[dict]:
+    """Store the exchange, the files it produced, and — if it went unanswered — the question.
+
+    The answer is stored as plain text, and with the steps the turn showed while
+    it worked, so a finished message can still say how it got there. Callers
+    pass the answer already cleaned by `plain_answer`, so what is stored is
+    exactly what the person was sent.
+    """
     now = datetime.now(timezone.utc).isoformat()
     saved = []
     for art in artifacts:
@@ -78,7 +88,8 @@ async def _persist_turn(db, session: dict, session_id: str, question: str, answe
             "$push": {"messages": {"$each": [
                 {"role": "user", "content": question, "created_at": now},
                 {"role": "assistant", "content": answer, "citations": citations,
-                 "artifacts": saved, "tools_used": tools_used, "created_at": now},
+                 "artifacts": saved, "tools_used": tools_used,
+                 "steps": steps or [], "duration_ms": duration_ms, "created_at": now},
             ]}},
         },
     )
@@ -94,6 +105,27 @@ async def _persist_turn(db, session: dict, session_id: str, question: str, answe
     if not did_work and answer_store.is_worth_recording(question, answer, citations):
         await answer_store.record(db, session["workspace_id"], question, user, session_id)
     return saved
+
+
+async def _persist_failure(db, session: dict, session_id: str, question: str, message: str,
+                           steps: list[dict], duration_ms: int) -> None:
+    """
+    A turn that failed still happened. Without this the question, the steps
+    the person watched and the failure all vanished on reload.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    is_first = len(session.get("messages", [])) == 0
+    title_update = {"title": question[:60] + ("…" if len(question) > 60 else "")} if is_first else {}
+    await db.chat_sessions.update_one(
+        {"_id": session_id},
+        {"$set": {"updated_at": datetime.now(timezone.utc), **title_update},
+         "$push": {"messages": {"$each": [
+             {"role": "user", "content": question, "created_at": now},
+             {"role": "assistant", "content": message, "error": True, "citations": [],
+              "artifacts": [], "tools_used": [], "steps": steps, "duration_ms": duration_ms,
+              "created_at": now},
+         ]}}},
+    )
 
 
 # ── Session endpoints ──────────────────────────────────────────────────────────
@@ -153,13 +185,14 @@ async def send_message(
 ):
     """One-shot answer. The streaming route below is what the UI uses."""
     session = await _require_session(session_id, user, db)
+    started = time.monotonic()
     col = await _equip(db, get_chroma(request), session, user, session_id, body.question)
     tools_used: list[str] = []
     try:
         passages = await asyncio.to_thread(col.search, query=body.question)
         # Strands Agent.__call__ is synchronous — run it in a thread pool
         response = await asyncio.to_thread(col.agent, _primed(body.question, passages))
-        answer = str(response)
+        answer = plain_answer(str(response))
         for m in getattr(col.agent, "messages", []) or []:
             for block in m.get("content", []) if isinstance(m, dict) else []:
                 if isinstance(block, dict) and "toolUse" in block:
@@ -167,9 +200,11 @@ async def send_message(
     finally:
         col.close()
 
+    citations = relevant_citations(col.citations, answer)
     artifacts = await _persist_turn(db, session, session_id, body.question, answer,
-                                    col.citations, col.artifacts, user, tools_used)
-    return {"answer": answer, "citations": col.citations, "artifacts": artifacts}
+                                    citations, col.artifacts, user, tools_used,
+                                    duration_ms=int((time.monotonic() - started) * 1000))
+    return {"answer": answer, "citations": citations, "artifacts": artifacts}
 
 
 # ── Streaming ─────────────────────────────────────────────────────────────────
@@ -185,6 +220,11 @@ TURN_DEADLINE_S = 150
 EQUIP_DEADLINE_S = 45
 QUIET_AFTER_S = 20
 MAX_MODEL_SWITCHES = 3
+
+# A person watching the answer form sees what the agent is doing, in words. A
+# model resting at its limit, a slow provider, a switch to another model: all of
+# that is plumbing, and it reaches them as one calm line, once.
+CALM_STEP = "Taking a little longer to check"
 
 
 def _primed(question: str, passages: str) -> str:
@@ -202,8 +242,9 @@ def _primed(question: str, passages: str) -> str:
         f"{passages}\n"
         "</passages_already_retrieved>\n\n"
         "These passages were retrieved from the project's sources for this question. Answer "
-        "from them when they are enough, citing source labels, and do not describe the retrieval "
-        "itself. Use a tool only when they miss something the question needs, or when it asks "
+        "from them when they are enough, in plain sentences. Do not copy their bracketed labels "
+        "or add citation markers: the sources are shown with your answer, so name one in words "
+        "only when it matters. Do not describe the retrieval itself. Use a tool only when they miss something the question needs, or when it asks "
         "for live data, a person's activity, a file, or an action."
     )
 
@@ -223,6 +264,67 @@ async def _pump(stream, queue: asyncio.Queue) -> None:
         await queue.put(("error", exc))
     else:
         await queue.put(("end", None))
+
+
+class AnswerGate:
+    """
+    Decides which of the model's text is the answer, while it streams.
+
+    Not all of it is. Text a model writes before calling a tool is narration
+    ("I need to fetch the open tickets first"); text before </think> is its
+    reasoning; a response a failover discards was never the answer. All of it
+    once reached the reader and the stored message: KAN-1's answer carried a
+    raw </think> and a second, contradictory answer after it.
+
+    So each model response's text is held until it is plainly the answer — the
+    stream ended, or enough of it has arrived that it is answering rather than
+    announcing. If a tool call or a retry follows text already shown, the shown
+    text is withdrawn with a reset and the answer starts again.
+    """
+
+    HOLD_CHARS = 400
+
+    def __init__(self):
+        self.cycle = ""       # raw text of the model response in progress
+        self.sent = ""        # what the reader has been shown of it
+        self.releasing = False
+
+    def _sync(self, clean: str) -> list[dict]:
+        events = []
+        if not clean.startswith(self.sent):
+            events.append({"type": "reset"})
+            self.sent = ""
+        extra = clean[len(self.sent):]
+        if extra:
+            events.append({"type": "text", "delta": extra})
+            self.sent = clean
+        return events
+
+    def feed(self, delta: str) -> list[dict]:
+        self.cycle += delta
+        clean = without_reasoning(self.cycle).lstrip()
+        if not self.releasing:
+            if len(clean) < self.HOLD_CHARS or re.search(r"<think>(?!.*</think>)", self.cycle, re.S | re.I):
+                return []
+            self.releasing = True
+        return self._sync(clean)
+
+    def discard(self) -> list[dict]:
+        """A tool call is starting, or the response is being retried: what came before was not the answer."""
+        events = [{"type": "reset"}] if self.sent else []
+        self.cycle, self.sent, self.releasing = "", "", False
+        return events
+
+    def finish(self) -> list[dict]:
+        return self._sync(without_reasoning(self.cycle).lstrip())
+
+    @property
+    def shown(self) -> bool:
+        return bool(self.sent)
+
+    @property
+    def answer(self) -> str:
+        return without_reasoning(self.cycle)
 
 
 def _sse(event: dict) -> str:
@@ -245,11 +347,27 @@ async def stream_message(
     chroma = get_chroma(request)
 
     async def events():
-        answer_parts: list[str] = []
+        gate = AnswerGate()
         announced: set[str] = set()
         tools_used: list[str] = []
+        steps: list[dict] = []
+        started = time.monotonic()
+        state = {"calm": False, "writing": False}
         col = None
+
+        def step(label: str, event: dict | None = None) -> str:
+            if not steps or steps[-1]["label"] != label:
+                steps.append({"label": label, "ms": int((time.monotonic() - started) * 1000)})
+            return _sse(event or {"type": "step", "label": label})
+
+        def calm() -> str | None:
+            if state["calm"]:
+                return None
+            state["calm"] = True
+            return step(CALM_STEP)
+
         try:
+            yield step("Reading your question")
             # Resolved before the stream opens; an auth question should not be
             # answered halfway through a response.
             try:
@@ -258,22 +376,23 @@ async def stream_message(
             except asyncio.TimeoutError:
                 raise TimeoutError("timed out connecting to this project's tools")
             for u in col.unavailable:
-                yield _sse({"type": "notice",
-                            "message": f"{u['grant']} is not answering right now, so its tools are unavailable this turn."})
+                yield step(f"{u['grant']} is not answering right now, so its tools are skipped this turn")
 
             # A per-minute limit on one model is not a limit on the next: switch
             # and carry on, as long as nothing has been said yet. And no question
-            # waits in silence: a quiet spell gets a notice, a stuck one a deadline.
-            started = time.monotonic()
-            told_slow = False
-            yield _sse({"type": "tool", "name": "search_project_docs",
-                        "label": col.narration.get("search_project_docs", "Searching the project's documents")})
+            # waits in silence: a quiet spell gets a calm step, a stuck one a deadline.
+            label = col.narration.get("search_project_docs", "Searching the project's documents")
+            yield step(label, {"type": "tool", "name": "search_project_docs", "label": label})
             tools_used.append("search_project_docs")
+            # The model's answer budget starts once the tools are connected, so a
+            # slow tool connection is not blamed on the model provider.
+            model_started = time.monotonic()
             for attempt in range(MAX_MODEL_SWITCHES + 1):
                 # Each colleague carries its own citation list, so a switch to
                 # another model searches again rather than losing the sources.
                 passages = await asyncio.to_thread(col.search, query=body.question)
                 queue: asyncio.Queue = asyncio.Queue()
+                gate.discard()
                 if col.failover is not None:
                     # A model hitting its limit mid-turn is handled inside the
                     # agent; the person hears about it through the same queue.
@@ -282,23 +401,27 @@ async def stream_message(
                     _pump(col.agent.stream_async(_primed(body.question, passages)), queue))
                 try:
                     while True:
-                        remaining = TURN_DEADLINE_S - (time.monotonic() - started)
+                        remaining = TURN_DEADLINE_S - (time.monotonic() - model_started)
                         if remaining <= 0:
                             raise TimeoutError("timed out waiting for the model provider")
                         try:
                             kind, chunk = await asyncio.wait_for(queue.get(), timeout=min(QUIET_AFTER_S, remaining))
                         except asyncio.TimeoutError:
-                            if not told_slow and remaining > QUIET_AFTER_S:
-                                told_slow = True
-                                yield _sse({"type": "notice", "message": "Still working — the model is slow to answer right now."})
+                            if remaining > QUIET_AFTER_S and (said := calm()):
+                                yield said
                             continue
                         if kind == "end":
                             break
                         if kind == "error":
                             raise chunk
                         if kind == "notice":
-                            told_slow = True
-                            yield _sse({"type": "notice", "message": chunk})
+                            # The failover's own words name models; the person
+                            # gets the calm step instead. A notice means the
+                            # response in progress is being redone elsewhere.
+                            for ev in gate.discard():
+                                yield _sse(ev)
+                            if said := calm():
+                                yield said
                             continue
 
                         # A tool starting. Announced once per invocation, not once
@@ -306,18 +429,27 @@ async def stream_message(
                         tool = chunk.get("current_tool_use")
                         if tool and tool.get("toolUseId") not in announced:
                             announced.add(tool["toolUseId"])
+                            # Whatever the model wrote before deciding to use a
+                            # tool was narration, not the answer.
+                            for ev in gate.discard():
+                                yield _sse(ev)
                             name = tool.get("name", "")
                             tools_used.append(name)
-                            yield _sse({
-                                "type": "tool",
-                                "name": name,
-                                "label": col.narration.get(name, f"Using {name.replace('_', ' ')}"),
-                            })
+                            label = col.narration.get(name, f"Using {name.replace('_', ' ')}")
+                            yield step(label, {"type": "tool", "name": name, "label": label})
 
                         text = chunk.get("data")
                         if text:
-                            answer_parts.append(text)
-                            yield _sse({"type": "text", "delta": text})
+                            for ev in gate.feed(text):
+                                if ev["type"] == "text" and not state["writing"]:
+                                    state["writing"] = True
+                                    yield step("Writing the answer")
+                                yield _sse(ev)
+                    for ev in gate.finish():
+                        if ev["type"] == "text" and not state["writing"]:
+                            state["writing"] = True
+                            yield step("Writing the answer")
+                        yield _sse(ev)
                     break
                 except TimeoutError:
                     raise
@@ -331,16 +463,17 @@ async def stream_message(
                     # has been said yet and one is actually available.
                     key = getattr(col.agent.model, "sensei_key", None) or model_named_in(exc)
                     if model_available(key):
-                        mark_exhausted(key, rest_after(exc))
+                        mark_exhausted(key, rest_after(exc), why=exc)
                     next_key = pick_model(background=False)[0]
-                    if (answer_parts or attempt == MAX_MODEL_SWITCHES or next_key == key
+                    if (gate.shown or attempt == MAX_MODEL_SWITCHES or next_key == key
                             or not model_available(next_key)):
                         raise RuntimeError(
-                            "Every model Sensei can use is at its limit right now. Try again in a minute."
+                            "Every model Sensei can use is busy right now. Try again in a minute."
                         ) from exc
                     col.close()
-                    yield _sse({"type": "notice",
-                                "message": f"That model is at its limit — switching to {next_key.split('/', 1)[-1]}."})
+                    print(f"[chat] switching this turn from {key} to {next_key}")
+                    if said := calm():
+                        yield said
                     col = await asyncio.wait_for(_equip(db, chroma, session, user, session_id, body.question),
                                                  timeout=EQUIP_DEADLINE_S)
                 finally:
@@ -348,17 +481,28 @@ async def stream_message(
                     if not pump.done():
                         pump.cancel()
 
-            answer = "".join(answer_parts)
+            answer = plain_answer(gate.answer)
+            duration_ms = int((time.monotonic() - started) * 1000)
             col.close()
+            citations = relevant_citations(col.citations, answer)
             artifacts = await _persist_turn(db, session, session_id, body.question, answer,
-                                            col.citations, col.artifacts, user, tools_used)
-            yield _sse({"type": "done", "citations": col.citations, "artifacts": artifacts,
-                        "refusals": col.refusals})
+                                            citations, col.artifacts, user, tools_used,
+                                            steps=steps, duration_ms=duration_ms)
+            yield _sse({"type": "done", "answer": answer, "citations": citations,
+                        "artifacts": artifacts, "refusals": col.refusals,
+                        "steps": steps, "duration_ms": duration_ms})
 
         except Exception as exc:
             # The stream has already started, so an HTTP error code is no longer
             # available — the failure has to travel as an event.
-            yield _sse({"type": "error", "message": humanise(exc)})
+            message = humanise(exc)
+            print(f"[chat] turn failed: {type(exc).__name__}: {str(exc)[:300]}")
+            try:
+                await _persist_failure(db, session, session_id, body.question, message, steps,
+                                       int((time.monotonic() - started) * 1000))
+            except Exception as store_exc:
+                print(f"[chat] could not store the failed turn: {store_exc}")
+            yield _sse({"type": "error", "message": message})
         finally:
             if col is not None:
                 col.close()

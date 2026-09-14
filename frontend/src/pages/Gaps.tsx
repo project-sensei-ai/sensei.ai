@@ -2,6 +2,7 @@ import { useState } from 'react'
 import {
   AlertTriangle, FileWarning, Loader2, PenLine, RefreshCw, ShieldQuestion, Sparkles, X,
 } from 'lucide-react'
+import { AnswerText } from '@/components/AnswerText'
 import { AppShell } from '@/components/AppShell'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -245,7 +246,7 @@ export default function Gaps() {
                       </span>
                     )}
                   </CardTitle>
-                  <CardDescription>{report.summary}</CardDescription>
+                  <AnswerText text={report.summary} className="text-sm text-muted-foreground" />
                 </CardHeader>
               </Card>
             )}

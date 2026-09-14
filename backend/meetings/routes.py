@@ -148,9 +148,9 @@ async def hear(meeting_id: str, body: UtteranceIn, request: Request,
             if attempt == 0 and is_quota_error(exc):
                 bench_for(exc, background=True)
                 continue
-            reply = listener.Reply(kind="silent", reason=f"could not judge it: {humanise(exc)}", trigger=utterance["text"])
+            reply = listener.fallback_reply(utterance["text"], humanise(exc))
     if reply is None:
-        reply = listener.Reply(kind="silent", reason="could not judge it", trigger=utterance["text"])
+        reply = listener.fallback_reply(utterance["text"], "could not judge it")
 
     reply_doc = {"_id": uuid4().hex, **reply.to_doc()}
     await db.meetings.update_one({"_id": meeting_id}, {"$push": {"replies": reply_doc}})
@@ -167,7 +167,7 @@ async def _finish(db, chroma_client, meeting_id: str) -> None:
     summary = None
     if transcript:
         try:
-            summary = await listener.summarise(doc.get("title", "Meeting"), transcript)
+            summary = await listener.summarise(doc.get("title", "Meeting"), transcript, doc.get("replies") or [])
         except Exception as exc:
             print(f"[meetings] summary failed: {exc}")
     held_at = _iso(doc.get("started_at")) or ""

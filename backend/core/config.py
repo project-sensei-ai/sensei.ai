@@ -51,7 +51,9 @@ class Settings(BaseSettings):
     # How many granted (MCP) tools are offered to the model on one turn. Every
     # tool schema is re-sent on every call; a server like GitHub exposes fifty.
     # The most relevant ones are chosen per question.
-    MAX_GRANT_TOOLS_PER_TURN: int = 8
+    # Four covers "list the open issues and pull requests"; each schema from a
+    # server like GitHub is 400–600 tokens, sent again on every model call.
+    MAX_GRANT_TOOLS_PER_TURN: int = 4
     # Output ceiling per model response.
     MAX_OUTPUT_TOKENS: int = 8000
     CHROMA_PERSIST_DIR: str = "./chroma_data"

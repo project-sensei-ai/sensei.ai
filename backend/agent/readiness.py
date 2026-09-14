@@ -14,6 +14,7 @@ the gap is closed for everyone, permanently.
 Cheap by construction: one call to write the questions, plain retrieval per
 question (no model), one call to grade all eight against what was retrieved.
 """
+import re
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
@@ -24,7 +25,8 @@ from agent import usage
 from agent.agent import _build_model, retry_on_quota
 from agent.tools import make_inventory_tool, make_search_tool
 from core.config import settings
-from core.errors import humanise
+from core.errors import humanise, refresh_error, reworded, stored_refresh_error
+from core.formatting import plain_answer
 
 QUESTIONS = 8
 RERUN_AFTER = timedelta(minutes=20)
@@ -140,8 +142,8 @@ async def run_readiness(db, chroma_client, workspace_id: str, force: bool = Fals
             items.append({
                 "question": q.question, "why": q.why,
                 "answerable": bool(g and g.answerable),
-                "answer": (g.answer if g else "") or "",
-                "source": (g.source if g else "") or "",
+                "answer": plain_answer((g.answer if g else "") or ""),
+                "source": clean_source(g.source if g else ""),
             })
         score = sum(1 for i in items if i["answerable"])
 
@@ -167,10 +169,20 @@ async def run_readiness(db, chroma_client, workspace_id: str, force: bool = Fals
             {"workspace_id": workspace_id},
             {"$set": {"status": "ready" if keep else "error",
                       "error_message": None if keep else humanise(exc),
-                      "refresh_error": humanise(exc) if keep else None,
+                      "refresh_error": refresh_error(exc) if keep else None,
                       "updated_at": datetime.now(timezone.utc)}},
         )
         print(f"[readiness] failed for {workspace_id}: {exc}")
+
+
+_MARKER = re.compile(r"\[\s*\^?\d+(?:\s*[,–-]\s*\d+)*\s*\]|【[^】]*】")
+
+
+def clean_source(source: str | None) -> str:
+    """ "[5] Confluence: SD – Apollo — Deployment runbook" reads as the name alone."""
+    text = _MARKER.sub("", source or "")
+    text = re.sub(r"^\s*\[([^\[\]]+)\]\s*$", r"\1", text.strip())   # a label wrapped whole in brackets
+    return re.sub(r"\s{2,}", " ", text).strip(" ,;")
 
 
 def serialize(doc: dict | None) -> dict | None:
@@ -181,8 +193,9 @@ def serialize(doc: dict | None) -> dict | None:
         "status": doc.get("status"),
         "score": doc.get("score", 0),
         "total": doc.get("total", 0),
-        "items": doc.get("items", []),
-        "error_message": doc.get("error_message"),
-        "refresh_error": doc.get("refresh_error"),
+        # Reports written before sources were cleaned still carry the markers.
+        "items": [{**i, "source": clean_source(i.get("source"))} for i in doc.get("items", [])],
+        "error_message": reworded(doc.get("error_message")),
+        "refresh_error": stored_refresh_error(doc.get("refresh_error")),
         "updated_at": _iso(doc.get("updated_at")),
     }
