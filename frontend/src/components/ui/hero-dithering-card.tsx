@@ -23,10 +23,9 @@ const sources = [
 ]
 
 const citations = [
-  { label: "Slack #all-sensei", icon: Hash },
-  { label: "Jira KAN-1", icon: CircleDot },
-  { label: "sensei.ai@d4f31a", icon: GitBranch },
-  { label: "billing-design", icon: FileText },
+  { label: "Confluence · On-call and escalation", icon: BookOpen },
+  { label: "Confluence · Deployment runbook", icon: FileText },
+  { label: "Jira · KAN-2", icon: CircleDot },
 ]
 
 interface CTASectionProps {
@@ -75,18 +74,19 @@ export function CTASection({
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
               <span className="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
             </span>
-            Your team context, indexed
+            Built on Strands Agents · live on AWS
           </div>
 
-<h2 className="font-serif text-4xl md:text-6xl lg:text-6xl font-medium tracking-[-0.03em] text-foreground mb-8 leading-[1.05]">
-                Every decision, <br />
-                <span className="text-foreground/80">answered instantly.</span>
-              </h2>
+<h1 className="font-serif text-4xl md:text-6xl lg:text-6xl font-medium tracking-[-0.03em] text-foreground mb-8 leading-[1.05]">
+                The colleague everyone interrupts, <br />
+                <span className="text-foreground/80">on call for the whole team.</span>
+              </h1>
 
           <p className="text-muted-foreground text-lg md:text-xl max-w-2xl mb-12 leading-relaxed">
-            Sensei connects Confluence, GitHub, Jira and Slack, and answers
-            project questions with citations you can verify — permission-aware,
-            grounded, and always up to date.
+            Sensei is an AI teammate a project owner onboards like a new hire:
+            the wiki, the repo, the tickets, Slack, and accounts on the tools.
+            It answers with citations, does the work, sits in meetings and in
+            Slack, and stays quiet when it has nothing to add.
           </p>
 
           <div className="flex flex-wrap items-center justify-center gap-3">
@@ -131,14 +131,16 @@ export function CTASection({
 
             <div className="mt-4 flex flex-col gap-3">
               <div className="self-end max-w-[85%] rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-sm text-primary-foreground">
-                When is the funding closing? And what did we decide on the payment SDK?
+                Who's on call next week, and can I ship the barcode fix on Friday?
               </div>
 
               <div className="self-start max-w-[92%] flex flex-col gap-3">
+                <div className="text-xs text-muted-foreground">Thought for 4s · 3 steps</div>
                 <div className="rounded-2xl rounded-bl-md border border-border bg-muted/50 px-4 py-3 text-sm text-foreground leading-relaxed">
-                  Funding closes next week. On the SDK, the team signed off on the
-                  merge for Friday — the decision thread, the ticket and the commit
-                  all line up:
+                  <strong>Daniel Okafor</strong> is primary on call the week of 15 September,
+                  Ravi Menon is secondary, and <strong>Priya Nair</strong> is release captain.
+                  Not on Friday: production deploys are Tuesday to Thursday, 10:00 to 16:00
+                  Irish time. KAN-2 is still open and owned by Chen Wei.
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {citations.map((c) => (
@@ -149,7 +151,7 @@ export function CTASection({
                   ))}
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Example answer — real answers cite exactly what you connect.
+                  A real answer from the sample project. Yours cite exactly what you connect.
                 </p>
               </div>
             </div>
@@ -173,11 +175,11 @@ export function CTASection({
         <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-sm text-foreground/80">
           <span className="inline-flex items-center gap-1.5">
             <Database className="h-4 w-4 text-foreground/50" />
-            Memory — decisions &amp; context indexed
+            Files, URLs and meeting notes too
           </span>
           <span className="inline-flex items-center gap-1.5">
             <MessagesSquare className="h-4 w-4 text-foreground/50" />
-            Chat — cited answers
+            Answers in chat, Slack and meetings
           </span>
         </div>
       </div>
