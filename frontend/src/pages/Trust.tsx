@@ -1,12 +1,13 @@
 import { Link } from 'react-router-dom'
 import {
-  ArrowUpRight, Ban, KeyRound, Loader2, Lock, ShieldCheck, Unlock, Users, Wrench,
+  ArrowUpRight, Ban, Hash, KeyRound, Loader2, Lock, ShieldCheck, Unlock, Users, Wrench,
 } from 'lucide-react'
 import { AppShell } from '@/components/AppShell'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { useGetTrustQuery, useDeleteSourceMutation, type Grant } from '@/services/onboardingApi'
+import { useGetTrustQuery, useGetSlackActivityQuery, useDeleteSourceMutation, type Grant } from '@/services/onboardingApi'
+import { AnswerText } from '@/components/AnswerText'
 
 function RevokeButton({ id }: { id: string }) {
   const [deleteSource, { isLoading }] = useDeleteSourceMutation()
@@ -108,6 +109,43 @@ function GrantCard({ grant, canManage }: { grant: Grant; canManage: boolean }) {
  * question people actually hesitate over before connecting anything: what did I
  * just give it, and can I take it back.
  */
+// What Sensei said, and declined to say, in Slack. Every silence carries its
+// reason, because "the bot said nothing" is a question people ask.
+function SlackRecordCard() {
+  const { data } = useGetSlackActivityQuery()
+  if (!data || data.replies.length === 0) return null
+  const label = (m: string) => (m === 'mentioned' ? 'Asked directly' : m === 'proactive' ? 'Stepped in' : 'Stayed quiet')
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Hash className="h-4 w-4 text-muted-foreground" /> In Slack
+        </CardTitle>
+        <CardDescription>
+          What it said, and what it left alone, with the reason each time. It answers when mentioned
+          or messaged, steps in only when the sources can cite an answer, and stays out of chatter.
+          {data.signing_secret_set ? ' Requests are verified with the Slack signing secret.' : ''}
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-2">
+        {data.replies.slice(0, 8).map((r) => (
+          <div key={r.id} className="rounded-md border px-3 py-2 text-sm">
+            <div className="flex items-center gap-2">
+              <Badge variant={r.posted ? 'default' : 'secondary'} className="text-xs">{label(r.mode)}</Badge>
+              <span className="min-w-0 flex-1 truncate text-muted-foreground">#{r.channel}: &ldquo;{r.text}&rdquo;</span>
+            </div>
+            {r.posted && r.answer ? (
+              <div className="mt-1.5 text-sm"><AnswerText text={r.answer} /></div>
+            ) : (
+              <p className="mt-1 text-xs text-muted-foreground">{r.reason}</p>
+            )}
+          </div>
+        ))}
+      </CardContent>
+    </Card>
+  )
+}
+
 export default function Trust() {
   const { data, isLoading } = useGetTrustQuery()
 
@@ -246,6 +284,8 @@ export default function Trust() {
             ))}
           </div>
         )}
+
+        <SlackRecordCard />
 
         {/* Files and links carry no credential and no ceiling worth stating.
             Giving each one a full card buried the two that do. */}

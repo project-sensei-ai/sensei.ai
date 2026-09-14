@@ -157,6 +157,24 @@ export interface Grant {
   improve?: string | null
 }
 
+export interface SlackReply {
+  id: string
+  channel: string | null
+  text: string | null
+  mode: 'mentioned' | 'proactive' | 'silent'
+  reason: string | null
+  posted: boolean
+  indexed: boolean
+  answer: string | null
+  at: string | null
+}
+
+export interface SlackActivity {
+  signing_secret_set: boolean
+  proactive: boolean
+  replies: SlackReply[]
+}
+
 export interface TrustOverview {
   workspace: { name: string; role: WorkspaceRole }
   grants: Grant[]
@@ -506,6 +524,10 @@ const onboardingApi = api.injectEndpoints({
       providesTags: ['Trust'],
     }),
 
+    getSlackActivity: builder.query<SlackActivity, void>({
+      query: () => '/slack/activity',
+    }),
+
     getLedger: builder.query<
       { entries: Unanswered[]; can_answer: boolean; stats: LedgerStats },
       void
@@ -692,6 +714,7 @@ export const {
   useCheckForChangesMutation,
   useAckDigestMutation,
   useGetTrustQuery,
+  useGetSlackActivityQuery,
   useGetLedgerQuery,
   useAnswerQuestionMutation,
   useDismissQuestionMutation,
