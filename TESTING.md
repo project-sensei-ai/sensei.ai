@@ -16,7 +16,7 @@ are what the agent actually produced.
 Members of Apollo, same password, who see it as teammates:
 `priya@apollo.demo` and `ravi@apollo.demo`.
 
-URL: `<LIVE_URL>` ← fill in after deploying, or run locally (§6).
+URL: https://54-198-101-11.sslip.io — or run locally (§6).
 
 No AWS account, Google account or credential of your own is needed.
 
