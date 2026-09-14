@@ -349,3 +349,19 @@ def test_an_anthropic_entry_builds_a_claude_model(monkeypatch):
     assert type(model).__name__ == "AnthropicModel"
     assert model.sensei_key == "anthropic/claude-sonnet-5"
     assert model.config["model_id"] == "claude-sonnet-5" and model.config["max_tokens"] == a.CHAT_OUTPUT_TOKENS
+
+
+def test_recent_history_keeps_the_last_exchanges_in_order():
+    from chat.routes import recent_history
+    msgs = [{"role": "user", "content": "q1"}, {"role": "assistant", "content": "a1"},
+            {"role": "user", "content": "q2"}, {"role": "assistant", "content": "", "error": True},
+            {"role": "user", "content": "q3"}, {"role": "assistant", "content": "a3"},
+            {"role": "user", "content": "q4"}, {"role": "assistant", "content": "x" * 5000},
+            {"role": "user", "content": "q5"}]
+    h = recent_history(msgs)
+    # q2's failed answer is dropped, so q2 and q3 merge into one user turn; the
+    # window keeps whole exchanges and ends on an answer, never a dangling question.
+    assert [m["role"] for m in h] == ["user", "assistant", "user", "assistant"]
+    assert h[0]["content"][0]["text"] == "q2\n\nq3"
+    assert h[-1]["content"][0]["text"].endswith("…") and len(h[-1]["content"][0]["text"]) < 1600
+    assert recent_history([{"role": "user", "content": "only a question"}]) == []

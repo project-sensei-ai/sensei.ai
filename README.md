@@ -135,7 +135,7 @@ is one command from a laptop with AWS credentials to a running instance.
 ### Tests
 
 ```bash
-cd backend && python -m pytest -q            # 88 tests, no model calls, ~0.5s
+cd backend && python -m pytest -q            # 154 tests, no model calls, ~1s
 
 # browser journeys, against a running server
 E2E_OWNER_PASSWORD=... python -m pytest tests/e2e -q
@@ -175,7 +175,10 @@ the project's documents", each tool's narration, "Writing the answer"). A model
 resting at its limit, a switch to another model or a slow provider reaches the
 person as one calm step, "Taking a little longer to check", never a model name.
 The steps and the turn's duration are stored on the message, and a finished
-answer shows them folded away as "Thought for 8s · 3 steps".
+answer shows them folded away as "Thought for 8s · 3 steps". The agent also
+sees the last three exchanges of the chat, so "and what is her target?" is
+answered in the context of the question before it; `S3_SESSION_BUCKET` swaps
+that replay for a persistent session store.
 
 **The write gate.** `WriteGate` is a Strands `HookProvider` on
 `BeforeToolCallEvent`. A granted tool the owner has not permitted gets
@@ -230,7 +233,7 @@ backend/
 ├── core/           config · security · secrets · mailer · errors
 ├── db/             membership.py is the single access rule
 ├── scripts/        seed_confluence.py · seed_apollo.py — the demo projects, built through the API
-└── tests/          88 unit tests + 7 browser journeys
+└── tests/          154 unit tests + 7 browser journeys
 frontend/src/pages/ Dashboard · Brief · Gaps · Answers · Trust · Sources · Tools · Meetings · Chat
 deploy/             docker-compose.prod.yml · Caddyfile · launch-ec2.sh
 ```

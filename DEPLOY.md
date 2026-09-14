@@ -96,5 +96,5 @@ chromadb plus the embedding model will OOM at 512 MB.
 | `DEBUG` | no | `false` in production so session cookies are `Secure` |
 | `LLM_BACKEND` | no | `groq` · `bedrock` · `ollama` |
 | `BEDROCK_MODEL_ID`, `BEDROCK_BACKGROUND_MODEL_ID` | Bedrock | cross-region inference profiles, e.g. `us.anthropic.claude-sonnet-4-6` |
-| `S3_SESSION_BUCKET` | no | agent conversation memory via `S3SessionManager` |
+| `S3_SESSION_BUCKET` | no | persistent conversation memory via `S3SessionManager`; without it the last three exchanges are replayed from the chat |
 | `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | no | prefer an instance role over static keys |

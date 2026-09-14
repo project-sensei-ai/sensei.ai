@@ -58,8 +58,41 @@ async def _equip(db, chroma, session: dict, user: dict, session_id: str, questio
         sources=sources, grants=grant_docs, user_id=user["id"],
         session_manager=make_session_manager(session_id), allowed_sources=allowed,
         question=question, grant_session=grant_session,
+        history=recent_history(session.get("messages") or []),
     )
     return col
+
+
+HISTORY_TURNS = 3
+HISTORY_CHARS = 1500
+
+
+def recent_history(messages: list[dict]) -> list[dict]:
+    """
+    The last few exchanges of this chat, as the model sees a conversation.
+
+    Without a session store the agent started every question from nothing, so
+    "and what is her target?" had no idea who "her" was. Failed turns are left
+    out, and long answers are cut, because every turn re-sends all of this.
+    """
+    kept: list[dict] = []
+    for m in messages:
+        if m.get("error") or not (m.get("content") or "").strip():
+            continue
+        role = "assistant" if m.get("role") == "assistant" else "user"
+        text = m["content"].strip()
+        if len(text) > HISTORY_CHARS:
+            text = text[:HISTORY_CHARS].rstrip() + " …"
+        if kept and kept[-1]["role"] == role:
+            kept[-1] = {"role": role, "content": [{"text": kept[-1]["content"][0]["text"] + "\n\n" + text}]}
+        else:
+            kept.append({"role": role, "content": [{"text": text}]})
+    kept = kept[-(2 * HISTORY_TURNS):]
+    while kept and kept[0]["role"] != "user":
+        kept.pop(0)
+    while kept and kept[-1]["role"] != "assistant":
+        kept.pop()
+    return kept
 
 
 async def _persist_turn(db, session: dict, session_id: str, question: str, answer: str,
@@ -238,14 +271,17 @@ def _primed(question: str, passages: str) -> str:
     """
     return (
         f"{question}\n\n"
-        "<passages_already_retrieved>\n"
+        "<what_the_sources_say>\n"
         f"{passages}\n"
-        "</passages_already_retrieved>\n\n"
-        "These passages were retrieved from the project's sources for this question. Answer "
-        "from them when they are enough, in plain sentences. Do not copy their bracketed labels "
+        "</what_the_sources_say>\n\n"
+        "Answer from what the sources say when it is enough, in plain sentences, as a colleague "
+        "who simply knows the project. Never mention passages, retrieval, notes, or what you "
+        "can or cannot see; never begin with what you can see. Do not copy the bracketed labels "
         "or add citation markers: the sources are shown with your answer, so name one in words "
-        "only when it matters. Do not describe the retrieval itself. Use a tool only when they miss something the question needs, or when it asks "
-        "for live data, a person's activity, a file, or an action."
+        "only when it matters. A short follow-up ('and her target?', 'what about it?') refers to "
+        "the previous turn of this conversation; answer it in that context. Use a tool only when "
+        "the sources miss something the question needs, or when it asks for live data, a "
+        "person's activity, a file, or an action."
     )
 
 

@@ -687,6 +687,7 @@ def build_colleague(
     question: str = "",
     max_grant_tools: int | None = None,
     grant_session=None,
+    history: list[dict] | None = None,
 ) -> Colleague:
     """
     Everything the chat agent gets: the index tools, the live Jira tools when a
@@ -761,6 +762,8 @@ def build_colleague(
         kwargs["hooks"] = hooks
     if session_manager is not None:
         kwargs["session_manager"] = session_manager
+    elif history:
+        kwargs["messages"] = history
 
     col = Colleague(
         agent=Agent(**kwargs),

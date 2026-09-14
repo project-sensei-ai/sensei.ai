@@ -159,7 +159,8 @@ async def run_readiness(db, chroma_client, workspace_id: str, force: bool = Fals
         await db.readiness.update_one(
             {"workspace_id": workspace_id},
             {"$set": {"status": "ready", "score": score, "total": len(items), "items": items,
-                      "updated_at": datetime.now(timezone.utc), "error_message": None}},
+                      "updated_at": datetime.now(timezone.utc), "error_message": None,
+                      "refresh_error": None}},
         )
         await usage.record(db, workspace_id, "readiness", None, settings.GROQ_BACKGROUND_MODEL)
         print(f"[readiness] {name}: ready for {score} of {len(items)}")

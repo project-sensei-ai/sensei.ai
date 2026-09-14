@@ -100,6 +100,32 @@ def _table_row(line: str) -> str | None:
     return "- " + " — ".join(cells)
 
 
+# Tags a model leaks from its own tool-call or output scaffolding
+# ("...not us-east-1.</correction></invoke>"), and any bare closing tag.
+_SCAFFOLD_TAG = re.compile(
+    r"</?(?:antml:)?(?:invoke|function_calls?|parameter|correction|answer|response|result|output|reply|"
+    r"reasoning|final_answer|thinking)\b[^<>]*>", re.I)
+_CLOSING_TAG = re.compile(r"</[A-Za-z_][\w:-]*>")
+
+# A colleague does not talk about "the passages" it was handed. Sentences about
+# them go, and a leading "From the passages, " is dropped from the sentence it opens.
+_PASSAGE_WORDS = r"(?:the passages|passages? (?:already |I was |I've been |I have been )?(?:retrieved|provided|given|above)|retrieved passages)"
+_PASSAGE_SENTENCE = re.compile(
+    r"(?:^|(?<=[.!?]\s))(?:I can see (?:that )?|I see (?:that )?)?[^.!?\n]*\b" + _PASSAGE_WORDS + r"\b[^.!?\n]*[.!?]\s*", re.I)
+_PASSAGE_LEAD = re.compile(
+    r"(?:^|(?<=[.!?]\s))(?:from|based on|according to|in|looking at|per) " + _PASSAGE_WORDS + r"(?:,? I can see(?: that)?)?,?\s+", re.I)
+
+
+def _drop_retrieval_talk(line: str) -> str:
+    before = line
+    line = _PASSAGE_LEAD.sub("", line)
+    if re.search(_PASSAGE_WORDS, line, re.I):
+        line = _PASSAGE_SENTENCE.sub("", line)
+    if line != before and line and line[0].islower():
+        line = line[0].upper() + line[1:]                    # "from the passages, he owns" -> "He owns"
+    return line
+
+
 def _inline(line: str) -> str:
     # Inline code is shielded from every rule below and comes back with its backticks.
     shelf: list[str] = []
@@ -109,6 +135,9 @@ def _inline(line: str) -> str:
         return f"\x00{len(shelf) - 1}\x00"
 
     line = _CODE.sub(keep, line)
+    line = _SCAFFOLD_TAG.sub("", line)
+    line = _CLOSING_TAG.sub("", line)
+    line = _drop_retrieval_talk(line)
     line = _LENTICULAR.sub("", line)
     line = _SOURCE_PAREN.sub("", line)
     line = _LINK.sub(r"\1", line)

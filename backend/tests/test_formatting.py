@@ -209,3 +209,18 @@ def test_bold_italic_triple_markers_become_bold():
 
 def test_call_parentheses_outside_code_kept():
     assert plain_answer("Call foo() first.") == "Call foo() first."
+
+
+def test_scaffold_tags_are_removed():
+    from core.formatting import plain_answer
+    assert plain_answer("Apollo runs on eu-west-1, not us-east-1.</correction>\n</invoke>") == "Apollo runs on eu-west-1, not us-east-1."
+    assert plain_answer("<answer>Priya Nair owns it.</answer>") == "Priya Nair owns it."
+    assert plain_answer("Use `List<String>` here.") == "Use `List<String>` here."
+
+
+def test_talk_about_passages_is_dropped():
+    from core.formatting import plain_answer
+    assert plain_answer("I can see KAN-1 in the passages already retrieved. **KAN-1** is a sprint plan.") == "**KAN-1** is a sprint plan."
+    assert plain_answer("From the passages, he also owns the routing worker.") == "He also owns the routing worker."
+    assert plain_answer("I can see the passages mention severity levels, but your question is unclear. Could you clarify?") == "Could you clarify?"
+    assert plain_answer("The runbook says deploys happen Tuesday to Thursday.") == "The runbook says deploys happen Tuesday to Thursday."
