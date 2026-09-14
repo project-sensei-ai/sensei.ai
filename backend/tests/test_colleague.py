@@ -365,3 +365,15 @@ def test_recent_history_keeps_the_last_exchanges_in_order():
     assert h[0]["content"][0]["text"] == "q2\n\nq3"
     assert h[-1]["content"][0]["text"].endswith("…") and len(h[-1]["content"][0]["text"]) < 1600
     assert recent_history([{"role": "user", "content": "only a question"}]) == []
+
+
+def test_a_null_from_the_model_reads_as_empty():
+    from agent.readiness import Grade, ReadinessGrades
+    from meetings.listener import ClaimVerdict, MeetingSummary
+    g = ReadinessGrades(grades=[{"question": "q", "answerable": False, "answer": None, "source": None}])
+    assert g.grades[0].answer == "" and g.grades[0].source == ""
+    assert MeetingSummary(summary="s", decisions=None, action_items=None, open_questions=None).decisions == []
+    v = ClaimVerdict(**{k: None for k in ClaimVerdict.model_fields if ClaimVerdict.model_fields[k].annotation is str},
+                     **{k: False for k in ClaimVerdict.model_fields if ClaimVerdict.model_fields[k].annotation is bool},
+                     **{k: 0.0 for k in ClaimVerdict.model_fields if ClaimVerdict.model_fields[k].annotation is float})
+    assert v.correction == ""

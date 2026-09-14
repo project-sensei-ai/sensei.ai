@@ -16,6 +16,8 @@ from typing import Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
+
+from agent.schemas import Lenient
 from strands import Agent, ModelRetryStrategy
 from strands.multiagent import GraphBuilder
 
@@ -30,7 +32,7 @@ RESCAN_DEBOUNCE = timedelta(minutes=10)
 
 # ── The artifact ──────────────────────────────────────────────────────────────
 
-class Gap(BaseModel):
+class Gap(Lenient):
     title: str = Field(description="The missing thing, named in a few words")
     kind: Literal["missing_document", "unowned_area", "dangling_reference", "thin_coverage"]
     detail: str = Field(description="What is missing and why it would matter to someone working here")
@@ -46,12 +48,12 @@ class Gap(BaseModel):
     )
 
 
-class GapReport(BaseModel):
+class GapReport(Lenient):
     summary: str = Field(description="One or two sentences on the overall state of this project's documentation")
     gaps: list[Gap] = Field(description="Up to 8, most consequential first")
 
 
-class DraftDocument(BaseModel):
+class DraftDocument(Lenient):
     title: str
     body_markdown: str = Field(description="The document itself, in markdown, ready to paste into a wiki")
     sources_used: list[str] = Field(default_factory=list)

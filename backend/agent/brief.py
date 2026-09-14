@@ -18,6 +18,8 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
+
+from agent.schemas import Lenient
 from strands import Agent
 from strands.multiagent import GraphBuilder
 
@@ -30,24 +32,24 @@ from agent import usage
 
 # ── The artifact ──────────────────────────────────────────────────────────────
 
-class ReadingItem(BaseModel):
+class ReadingItem(Lenient):
     title: str = Field(description="Document or page name, exactly as it is named in the sources")
     source: str = Field(description="Which source it lives in, e.g. 'Confluence: ENG' or 'README.md'")
     why: str = Field(description="One line on why this person should read it")
 
 
-class PersonToMeet(BaseModel):
+class PersonToMeet(Lenient):
     name: str = Field(description="Person's name or handle as it appears in the sources")
     why: str = Field(description="What they own or know that is relevant to this joiner")
 
 
-class BriefSection(BaseModel):
+class BriefSection(Lenient):
     heading: str
     body: str = Field(description="2-4 sentences. Only facts supported by the findings.")
     sources: list[str] = Field(default_factory=list, description="Source labels supporting this section")
 
 
-class OnboardingBrief(BaseModel):
+class OnboardingBrief(Lenient):
     """A new joiner's orientation, assembled from the project's own sources."""
     headline: str = Field(description="One sentence: what this project is, in plain language")
     sections: list[BriefSection] = Field(description="3-5 sections: what it does, how it is built, how work flows, anything notable")

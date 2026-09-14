@@ -26,6 +26,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from pydantic import BaseModel, Field
+
+from agent.schemas import Lenient
 from strands import Agent, ModelRetryStrategy
 
 from agent.agent import _build_model
@@ -56,7 +58,7 @@ _ASSERTION = re.compile(
 _HEDGE = re.compile(r"\b(i think|maybe|probably|not sure|might|could be|i guess|if i recall|\?)", re.IGNORECASE)
 
 
-class ClaimVerdict(BaseModel):
+class ClaimVerdict(Lenient):
     """What the sources say about a thing somebody just asserted."""
     is_factual_claim: bool = Field(description="True if the utterance asserts a checkable fact about this project")
     claim: str = Field(default="", description="The claim, restated in one sentence")
@@ -233,7 +235,7 @@ async def consider(workspace_id: str, chroma_client, text: str, context: str,
 
 # ── After the meeting ─────────────────────────────────────────────────────────
 
-class MeetingSummary(BaseModel):
+class MeetingSummary(Lenient):
     summary: str = Field(description="3-6 sentences on what the meeting covered")
     decisions: list[str] = Field(default_factory=list, description="Decisions actually made, one line each")
     action_items: list[str] = Field(default_factory=list, description="Who does what, as stated; empty if none")

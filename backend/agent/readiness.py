@@ -19,6 +19,8 @@ from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
+
+from agent.schemas import Lenient
 from strands import Agent, ModelRetryStrategy
 
 from agent import usage
@@ -34,23 +36,23 @@ RERUN_AFTER = timedelta(minutes=20)
 SELF = {"id": "sensei", "name": "Sensei (self-check)", "email": None}
 
 
-class JoinerQuestion(BaseModel):
+class JoinerQuestion(Lenient):
     question: str = Field(description="One specific question a new joiner to THIS project would ask in week one")
     why: str = Field(description="Why they would need it, in a few words")
 
 
-class QuestionSet(BaseModel):
+class QuestionSet(Lenient):
     questions: list[JoinerQuestion] = Field(description=f"Exactly {QUESTIONS} questions, each about a different area")
 
 
-class Grade(BaseModel):
+class Grade(Lenient):
     question: str
     answerable: bool = Field(description="True only if the passages actually contain the answer")
     answer: str = Field(default="", description="The answer in one or two sentences, if answerable; else empty")
     source: str = Field(default="", description="The source label that supports it, if answerable")
 
 
-class ReadinessGrades(BaseModel):
+class ReadinessGrades(Lenient):
     grades: list[Grade]
 
 
