@@ -1,6 +1,6 @@
 """Tool grants — connect an MCP server, decide what the agent may do with it."""
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Literal
 from uuid import uuid4
 
@@ -193,6 +193,14 @@ setTimeout(() => {{ try {{ window.close(); }} catch (e) {{}} }}, 1500);
 @router.get("")
 async def list_tools(user=Depends(get_current_user), db=Depends(get_db)):
     ws, role = await require_workspace(user, db)
+    # A sign-in window closed without finishing leaves the connection waiting
+    # forever. After ten minutes, say what happened so the owner can retry.
+    await db.tool_grants.update_many(
+        {"workspace_id": ws["_id"], "status": "authorizing",
+         "created_at": {"$lt": datetime.now(timezone.utc) - timedelta(minutes=10)}},
+        {"$set": {"status": "error",
+                  "error_message": "The sign-in was not completed. Sign in again to finish connecting."}},
+    )
     grants = await registry.load_grants(db, ws["_id"])
     is_owner = role in OWNER_ROLES
     return {

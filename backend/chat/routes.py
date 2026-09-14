@@ -1,6 +1,7 @@
 """Chat routes — session management + the colleague answering, streamed."""
 import asyncio
 import json
+import time
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -12,8 +13,8 @@ from agent.agent import build_colleague, make_session_manager
 from answers import store as answer_store
 from artifacts.routes import serialize_artifact
 from auth.deps import get_current_user
-from core.errors import humanise, is_quota_error, model_named_in
-from agent.agent import mark_exhausted
+from core.errors import humanise, is_quota_error, is_rate_limit_error, model_named_in
+from agent.agent import mark_exhausted, model_available, pick_model
 from db.chroma import get_chroma
 from db.database import get_db
 from db.membership import require_workspace, visible_sources
@@ -155,8 +156,9 @@ async def send_message(
     col = await _equip(db, get_chroma(request), session, user, session_id, body.question)
     tools_used: list[str] = []
     try:
+        passages = await asyncio.to_thread(col.search, query=body.question)
         # Strands Agent.__call__ is synchronous — run it in a thread pool
-        response = await asyncio.to_thread(col.agent, body.question)
+        response = await asyncio.to_thread(col.agent, _primed(body.question, passages))
         answer = str(response)
         for m in getattr(col.agent, "messages", []) or []:
             for block in m.get("content", []) if isinstance(m, dict) else []:
@@ -176,6 +178,52 @@ async def send_message(
 # up to forty seconds while the agent searches, reads and reasons. All of that
 # work is interesting — it is the evidence that there is an agent here at all —
 # and hiding it behind a spinner throws it away.
+
+# How long one question may take before the person is told, and how long a
+# silence lasts before they hear it is still being worked on.
+TURN_DEADLINE_S = 150
+EQUIP_DEADLINE_S = 45
+QUIET_AFTER_S = 20
+MAX_MODEL_SWITCHES = 3
+
+
+def _primed(question: str, passages: str) -> str:
+    """
+    The question, with what the sources already say about it.
+
+    Retrieval costs no model tokens, and a model that has to ask for the
+    passages spends two or three calls re-reading the whole conversation. On a
+    provider that allows 8,000 tokens a minute, that difference is whether a
+    question gets answered at all.
+    """
+    return (
+        f"{question}\n\n"
+        "<passages_already_retrieved>\n"
+        f"{passages}\n"
+        "</passages_already_retrieved>\n\n"
+        "These passages were retrieved from the project's sources for this question. Answer "
+        "from them when they are enough, citing source labels, and do not describe the retrieval "
+        "itself. Use a tool only when they miss something the question needs, or when it asks "
+        "for live data, a person's activity, a file, or an action."
+    )
+
+
+async def _pump(stream, queue: asyncio.Queue) -> None:
+    """
+    Drain the agent's stream inside one task and hand it over through a queue.
+
+    Pulling each chunk from a fresh task broke OpenTelemetry's bookkeeping: a
+    span opened in one task was closed from another, and every turn logged a
+    traceback. One task owns the stream from first chunk to last.
+    """
+    try:
+        async for chunk in stream:
+            await queue.put(("chunk", chunk))
+    except Exception as exc:
+        await queue.put(("error", exc))
+    else:
+        await queue.put(("end", None))
+
 
 def _sse(event: dict) -> str:
     return f"data: {json.dumps(event)}\n\n"
@@ -204,16 +252,55 @@ async def stream_message(
         try:
             # Resolved before the stream opens; an auth question should not be
             # answered halfway through a response.
-            col = await _equip(db, chroma, session, user, session_id, body.question)
+            try:
+                col = await asyncio.wait_for(_equip(db, chroma, session, user, session_id, body.question),
+                                             timeout=EQUIP_DEADLINE_S)
+            except asyncio.TimeoutError:
+                raise TimeoutError("timed out connecting to this project's tools")
             for u in col.unavailable:
                 yield _sse({"type": "notice",
                             "message": f"{u['grant']} is not answering right now, so its tools are unavailable this turn."})
 
-            # One retry on a daily-quota error, on the next model with quota
-            # left. A demo should not go dark because one model's day ran out.
-            for attempt in range(2):
+            # A per-minute limit on one model is not a limit on the next: switch
+            # and carry on, as long as nothing has been said yet. And no question
+            # waits in silence: a quiet spell gets a notice, a stuck one a deadline.
+            started = time.monotonic()
+            told_slow = False
+            yield _sse({"type": "tool", "name": "search_project_docs",
+                        "label": col.narration.get("search_project_docs", "Searching the project's documents")})
+            tools_used.append("search_project_docs")
+            for attempt in range(MAX_MODEL_SWITCHES + 1):
+                # Each colleague carries its own citation list, so a switch to
+                # another model searches again rather than losing the sources.
+                passages = await asyncio.to_thread(col.search, query=body.question)
+                queue: asyncio.Queue = asyncio.Queue()
+                if col.failover is not None:
+                    # A model hitting its limit mid-turn is handled inside the
+                    # agent; the person hears about it through the same queue.
+                    col.failover.on_notice = lambda message, q=queue: q.put_nowait(("notice", message))
+                pump = asyncio.create_task(
+                    _pump(col.agent.stream_async(_primed(body.question, passages)), queue))
                 try:
-                    async for chunk in col.agent.stream_async(body.question):
+                    while True:
+                        remaining = TURN_DEADLINE_S - (time.monotonic() - started)
+                        if remaining <= 0:
+                            raise TimeoutError("timed out waiting for the model provider")
+                        try:
+                            kind, chunk = await asyncio.wait_for(queue.get(), timeout=min(QUIET_AFTER_S, remaining))
+                        except asyncio.TimeoutError:
+                            if not told_slow and remaining > QUIET_AFTER_S:
+                                told_slow = True
+                                yield _sse({"type": "notice", "message": "Still working — the model is slow to answer right now."})
+                            continue
+                        if kind == "end":
+                            break
+                        if kind == "error":
+                            raise chunk
+                        if kind == "notice":
+                            told_slow = True
+                            yield _sse({"type": "notice", "message": chunk})
+                            continue
+
                         # A tool starting. Announced once per invocation, not once
                         # per streamed fragment of its arguments.
                         tool = chunk.get("current_tool_use")
@@ -232,14 +319,34 @@ async def stream_message(
                             answer_parts.append(text)
                             yield _sse({"type": "text", "delta": text})
                     break
-                except Exception as exc:
-                    if attempt == 0 and is_quota_error(exc) and not answer_parts:
-                        mark_exhausted(getattr(col.agent.model, "sensei_key", None) or model_named_in(exc))
-                        col.close()
-                        yield _sse({"type": "notice", "message": "One model hit its daily limit — switching to another."})
-                        col = await _equip(db, chroma, session, user, session_id, body.question)
-                        continue
+                except TimeoutError:
                     raise
+                except Exception as exc:
+                    daily = is_quota_error(exc)
+                    busy = daily or is_rate_limit_error(exc)
+                    if not busy:
+                        raise
+                    # Reaching here means the agent's own failover ran out of
+                    # models with room. Start over on another only if nothing
+                    # has been said yet and one is actually available.
+                    key = getattr(col.agent.model, "sensei_key", None) or model_named_in(exc)
+                    if model_available(key):
+                        mark_exhausted(key, 3600 if daily else 75)
+                    next_key = pick_model(background=False)[0]
+                    if (answer_parts or attempt == MAX_MODEL_SWITCHES or next_key == key
+                            or not model_available(next_key)):
+                        raise RuntimeError(
+                            "Every model Sensei can use is at its limit right now. Try again in a minute."
+                        ) from exc
+                    col.close()
+                    yield _sse({"type": "notice",
+                                "message": f"That model is at its limit — switching to {next_key.split('/', 1)[-1]}."})
+                    col = await asyncio.wait_for(_equip(db, chroma, session, user, session_id, body.question),
+                                                 timeout=EQUIP_DEADLINE_S)
+                finally:
+                    # A person who closes the tab should not leave a model call running.
+                    if not pump.done():
+                        pump.cancel()
 
             answer = "".join(answer_parts)
             col.close()

@@ -122,3 +122,146 @@ def test_pick_model_routes_around_an_exhausted_model(monkeypatch):
     a.mark_exhausted("groq/first")
     assert a.pick_model(False)[3] == "second"
     a._EXHAUSTED.clear()
+
+
+
+# ── When a model is busy ─────────────────────────────────────────────────────
+
+def test_per_minute_limits_are_told_apart_from_daily_caps():
+    from core.errors import is_quota_error, is_rate_limit_error
+    minute = "Error code: 429 - Rate limit reached for model `openai/gpt-oss-120b` on tokens per minute (TPM)"
+    day = "Error code: 429 - Rate limit reached for model `openai/gpt-oss-120b` on tokens per day (TPD)"
+    assert is_rate_limit_error(minute) and not is_quota_error(minute)
+    assert is_quota_error(day)
+    assert not is_rate_limit_error("Connection refused")
+
+
+def test_a_benched_model_comes_back_when_its_time_is_up():
+    import time
+    from agent import agent as a
+    a._EXHAUSTED.clear()
+    a.mark_exhausted("groq/x", seconds=0.01)
+    assert not a._usable("groq/x")
+    time.sleep(0.02)
+    assert a._usable("groq/x")
+    a._EXHAUSTED.clear()
+
+
+def test_background_work_uses_the_chat_model_last(monkeypatch):
+    from agent import agent as a
+    monkeypatch.setattr(a.settings, "GROQ_API_KEY", "g")
+    monkeypatch.setattr(a.settings, "CEREBRAS_API_KEY", "")
+    monkeypatch.setattr(a.settings, "GEMINI_API_KEY", "")
+    monkeypatch.setattr(a.settings, "OPENROUTER_API_KEY", "")
+    monkeypatch.setattr(a.settings, "GROQ_MODEL", "chat")
+    monkeypatch.setattr(a.settings, "GROQ_BACKGROUND_MODEL", "small")
+    monkeypatch.setattr(a.settings, "GROQ_FALLBACK_MODELS", "chat,other")
+    models = [c[3] for c in a.model_chain(background=True)]
+    assert models == ["small", "other", "chat"]
+
+
+def test_select_relevant_drops_tools_the_question_does_not_touch():
+    tools = [_tool("gh_list_issues", "List issues in a repository")] + \
+            [_tool(f"gh_thing_{i}", "Something unrelated") for i in range(20)]
+    assert select_relevant(tools, "what is the production deploy window", limit=8) == []
+
+
+def test_unfinished_sign_ins_are_not_opened():
+    from toolgrants.registry import GrantSession
+    session = GrantSession().open([
+        {"_id": "1", "name": "Atlassian", "kind": "mcp_oauth", "status": "authorizing", "url": "https://mcp.example.com/mcp"},
+        {"_id": "2", "name": "Broken", "kind": "mcp_http", "status": "error", "url": "https://mcp.example.com/mcp"},
+    ])
+    assert session.tools == [] and session.clients == [] and session.failed == []
+
+
+
+def test_filler_words_do_not_make_a_tool_relevant():
+    tools = [_tool("github_list_pull_requests", "List pull requests in a GitHub repository. Use this when you want to know which PRs are open"),
+             _tool("github_get_me", "Get details of the authenticated GitHub user"),
+             _tool("atlassian_searchConfluenceUsingCql", "Search Confluence pages using CQL")]
+    chosen = {t.tool_name for t in select_relevant(tools, "Which Confluence pages do we have about deployment?", limit=2)}
+    assert chosen == {"atlassian_searchConfluenceUsingCql"}
+
+
+def test_output_budget_respects_models_with_small_output_limits(monkeypatch):
+    from agent import agent as a
+    monkeypatch.setattr(a.settings, "MAX_OUTPUT_TOKENS", 8000)
+    assert a.max_output_tokens("qwen/qwen3.8-27b", background=True) == 900
+    assert a.max_output_tokens("openai/gpt-oss-120b", background=False) == 2000
+    assert a.max_output_tokens("openai/gpt-oss-20b", background=True) == 8000
+
+
+def test_the_question_is_sent_with_its_passages():
+    from chat.routes import _primed
+    prompt = _primed("What is the deploy window?", "[1] Source: Confluence: SD\nTuesday to Thursday")
+    assert prompt.startswith("What is the deploy window?")
+    assert "Tuesday to Thursday" in prompt and "Use a tool only when" in prompt
+
+
+def test_the_stream_is_drained_in_one_task():
+    import asyncio
+    from chat.routes import _pump
+
+    async def fine():
+        yield {"data": "a"}
+        yield {"data": "b"}
+
+    async def throttled():
+        yield {"data": "a"}
+        raise RuntimeError("429 rate limit")
+
+    async def drain(stream):
+        queue = asyncio.Queue()
+        await _pump(stream, queue)
+        return [queue.get_nowait() for _ in range(queue.qsize())]
+
+    assert [kind for kind, _ in asyncio.run(drain(fine()))] == ["chunk", "chunk", "end"]
+    last_kind, last = asyncio.run(drain(throttled()))[-1]
+    assert last_kind == "error" and "rate limit" in str(last)
+
+
+def test_the_wait_a_provider_asks_for_is_read():
+    from core.errors import retry_after_seconds
+    assert retry_after_seconds("Please try again in 7.7925s. Need more tokens?") == 7.7925
+    assert retry_after_seconds("Please try again in 1m12.5s.") == 72.5
+    assert retry_after_seconds("try again in 450ms") == 0.45
+    assert retry_after_seconds("Rate limit reached") is None
+
+
+def _throttle_once(a, monkeypatch, chain):
+    import asyncio
+    from strands.types.exceptions import ModelThrottledException
+    a._EXHAUSTED.clear()
+    monkeypatch.setattr(a.settings, "LLM_BACKEND", "groq")
+    monkeypatch.setattr(a, "model_chain", lambda background: chain)
+    monkeypatch.setattr(a, "_build_model", lambda background=False, entry=None: SimpleNamespace(sensei_key=entry[0]))
+    notices = []
+    hook = a.ModelFailover(max_wait_s=0.2)
+    hook.on_notice = notices.append
+    event = SimpleNamespace(
+        retry=False,
+        exception=ModelThrottledException(
+            "Rate limit reached for model `m1` on tokens per minute (TPM). Please try again in 7.5s."),
+        agent=SimpleNamespace(model=SimpleNamespace(sensei_key=chain[0][0])),
+    )
+    asyncio.run(hook._after_model_call(event))
+    return event, notices
+
+
+def test_a_throttled_call_moves_to_the_next_model_and_keeps_its_work(monkeypatch):
+    from agent import agent as a
+    event, notices = _throttle_once(a, monkeypatch, [("groq/m1", "groq", "u", "m1"), ("groq/m2", "groq", "u", "m2")])
+    assert event.retry is True
+    assert event.agent.model.sensei_key == "groq/m2"
+    assert notices and "m2" in notices[0]
+    assert not a.model_available("groq/m1")
+    a._EXHAUSTED.clear()
+
+
+def test_a_long_rest_on_every_model_is_reported_not_waited_out(monkeypatch):
+    from agent import agent as a
+    event, notices = _throttle_once(a, monkeypatch, [("groq/m1", "groq", "u", "m1")])
+    assert event.retry is False
+    assert notices == []
+    a._EXHAUSTED.clear()

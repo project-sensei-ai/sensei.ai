@@ -198,6 +198,16 @@ def _trim(tool) -> None:
 
 
 _WORD = re.compile(r"[a-z0-9]{3,}")
+# Words every question and every tool description share. Counting them made
+# "which Confluence pages cover deployment" pick eight GitHub tools.
+_FILLER = {
+    "the", "and", "for", "with", "what", "which", "who", "whom", "when", "where", "why", "how",
+    "have", "has", "had", "are", "was", "were", "our", "your", "you", "this", "that", "these",
+    "those", "from", "into", "about", "does", "did", "can", "could", "would", "should", "will",
+    "there", "their", "them", "they", "its", "any", "all", "not", "but", "get", "got", "use",
+    "using", "please", "tell", "give", "also", "just", "like", "need", "want", "know", "some",
+    "more", "most", "than", "then", "each", "other", "only", "been", "being", "here", "such",
+}
 
 
 def select_relevant(tools: list, question: str, limit: int, always: set[str] | None = None) -> list:
@@ -212,7 +222,7 @@ def select_relevant(tools: list, question: str, limit: int, always: set[str] | N
     """
     if len(tools) <= limit:
         return tools
-    q = set(_WORD.findall((question or "").lower()))
+    q = set(_WORD.findall((question or "").lower())) - _FILLER
     always = always or set()
 
     def score(t) -> float:
@@ -223,7 +233,9 @@ def select_relevant(tools: list, question: str, limit: int, always: set[str] | N
         base = 0.5 if any(k in name for k in ("search", "list", "get_me", "get_repo", "get_issue", "get_pull")) else 0.0
         return overlap + base
 
-    ranked = sorted(tools, key=score, reverse=True)
+    # Only tools the question actually touches. A documentation question
+    # should not pay for fifty GitHub schemas it will never call.
+    ranked = sorted((t for t in tools if score(t) >= 1), key=score, reverse=True)
     keep = [t for t in tools if t.tool_name in always]
     for t in ranked:
         if len(keep) >= limit:
@@ -249,7 +261,9 @@ class GrantSession:
 
     def open(self, grants: list[dict]) -> "GrantSession":
         for g in grants:
-            if g.get("status") == "disabled":
+            # A sign-in that never finished, or a connection already known to
+            # be broken, is skipped rather than retried on every question.
+            if g.get("status", "connected") != "connected":
                 continue
             prefix = slug(g.get("name", ""))
             self.grant_names[prefix] = g.get("name", prefix)

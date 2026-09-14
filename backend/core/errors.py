@@ -34,6 +34,9 @@ _KNOWN = [
     (re.compile(r"tool_use_failed|Tool choice is none", re.I),
      "The model tried to use a tool when it was not allowed to.",
      "Usually transient — try again."),
+    (re.compile(r"Every model Sensei can use", re.I),
+     None,
+     None),
     (re.compile(r"SECRET_ENCRYPTION_KEY", re.I),
      None,   # These messages are already written for a person.
      None),
@@ -52,6 +55,15 @@ _QUOTA = re.compile(r"tokens per day|TPD|daily limit|Request too large", re.I)
 _MODEL_IN_ERROR = re.compile(r"model `([^`]+)`|model ([\w./-]+)", re.I)
 
 
+_RATE = re.compile(r"rate.?limit|\b429\b|tokens per minute|\bTPM\b|ITPM|requests per minute|\bRPM\b|ModelThrottled|throttl", re.I)
+
+
+def is_rate_limit_error(exc: BaseException | str) -> bool:
+    """A per-minute limit: that model is busy, another one may not be."""
+    text = f"{type(exc).__name__ if isinstance(exc, BaseException) else ''} {exc}"
+    return bool(_RATE.search(text))
+
+
 def is_quota_error(exc: BaseException | str) -> bool:
     """A daily cap, as opposed to a per-minute rate limit worth retrying."""
     return bool(_QUOTA.search(str(exc)))
@@ -60,6 +72,19 @@ def is_quota_error(exc: BaseException | str) -> bool:
 def model_named_in(exc: BaseException | str) -> str | None:
     m = _MODEL_IN_ERROR.search(str(exc))
     return (m.group(1) or m.group(2)) if m else None
+
+
+_RETRY_AFTER = re.compile(r"try again in\s+(?:(\d+)h)?\s*(?:(\d+)m(?!s))?\s*(?:(\d+(?:\.\d+)?)(ms|s))?", re.I)
+
+
+def retry_after_seconds(exc: BaseException | str) -> float | None:
+    """How long the provider said to wait: "Please try again in 1m12.5s" is 72.5."""
+    m = _RETRY_AFTER.search(str(exc))
+    if not m or not any(m.group(i) for i in (1, 2, 3)):
+        return None
+    hours, minutes, amount, unit = m.groups()
+    seconds = float(amount or 0) / (1000 if (unit or "").lower() == "ms" else 1)
+    return int(hours or 0) * 3600 + int(minutes or 0) * 60 + seconds
 
 
 def humanise(exc: BaseException | str, fallback: str = "Something went wrong.") -> str:
