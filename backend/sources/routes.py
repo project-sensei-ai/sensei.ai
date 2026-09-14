@@ -113,6 +113,17 @@ class SlackSourceIn(BaseModel):
         return v
 
 
+# The update flavours reuse every validator but let a blank secret mean "keep
+# the stored one" — the UI never sees the secret, so re-typing it on every
+# edit would be the only way to change the channel otherwise.
+class JiraSourceUpdate(JiraSourceIn):
+    api_token: str = ""
+
+
+class SlackSourceUpdate(SlackSourceIn):
+    token: str = ""
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 async def _verify_confluence(body) -> None:
@@ -457,6 +468,80 @@ async def add_source(
 
     await db.sources.insert_one(doc)
     return {"source": serialize_source(doc)}
+
+
+@router.patch("/{source_id}")
+async def update_source(
+    source_id: str,
+    body: Annotated[
+        Union[JiraSourceUpdate, SlackSourceUpdate],
+        Field(discriminator="type"),
+    ],
+    request: Request,
+    user=Depends(get_current_user),
+    db=Depends(get_db),
+):
+    ws = await require_owner(user, db, "add or remove sources")
+    source = await db.sources.find_one({"_id": source_id, "workspace_id": ws["_id"]})
+    if not source:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Source not found")
+    if source["type"] != body.type:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "A source's type cannot be changed — delete it and add the new kind.",
+        )
+
+    stored = secrets.decrypt_dict(source.get("config_secret"))
+
+    if body.type == "jira":
+        token = body.api_token or stored.get("api_token", "")
+        check = JiraSourceIn(
+            type="jira", base_url=body.base_url, email=body.email,
+            api_token=token, project_key=body.project_key,
+        )
+        await _verify_jira(check)
+        project_key = check.project_key.strip().upper()
+        label = body.label or source.get("label") or f"Jira: {project_key}"
+        config = {"base_url": check.base_url, "project_key": project_key, "email": check.email}
+        config_secret = {"api_token": token}
+    else:
+        token = body.token or stored.get("token", "")
+        check = SlackSourceIn(type="slack", token=token, channel=body.channel)
+        info = await _verify_slack(check)
+        label = body.label or source.get("label") or f"Slack: #{info['channel_name']}"
+        config = {
+            "channel_id": info["channel_id"],
+            "channel_name": info["channel_name"],
+            "team_domain": info["team_domain"],
+        }
+        config_secret = {"token": token}
+
+    # The indexed chunks belong to the old config — drop them so a re-ingest
+    # starts clean, and reset to pending so the frontend polls for it.
+    try:
+        chroma = get_chroma(request)
+        collection = get_workspace_collection(chroma, ws["_id"])
+        if collection.count() > 0:
+            collection.delete(where={"source_id": source_id})
+    except Exception:
+        pass  # ChromaDB cleanup is best-effort
+
+    now = datetime.now(timezone.utc)
+    await db.sources.update_one(
+        {"_id": source_id},
+        {"$set": {
+            "config": config,
+            "config_secret": secrets.encrypt_dict(config_secret),
+            "label": label,
+            "status": "pending",
+            "stats": {},
+            "error_message": None,
+            "updated_at": now,
+        }, "$unset": {"content_fingerprint": 1, "last_checked_at": 1}},
+    )
+
+    updated = await db.sources.find_one({"_id": source_id})
+    return {"source": serialize_source(updated)}
 
 
 @router.post("/upload", status_code=status.HTTP_201_CREATED)

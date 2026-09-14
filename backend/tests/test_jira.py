@@ -110,6 +110,7 @@ class _FakeClient:
                 "priority": {"name": "High"},
                 "assignee": {"displayName": "Aditya"},
                 "labels": ["auth"],
+                "customfield_10019": {"value": "Squad B"},
                 "description": {"type": "doc", "content": [
                     {"type": "paragraph", "content": [{"type": "text", "text": "Broken since v2"}]},
                 ]},
@@ -131,6 +132,10 @@ class _FakeClient:
         ]
 
     async def get(self, url, params=None):
+        if url.endswith("/rest/api/3/field"):
+            return _FakeResponse([
+                {"id": "customfield_10019", "name": "Team", "custom": True},
+            ])
         assert url.endswith("/rest/api/3/search/jql"), url
         token = params.get("nextPageToken")
         if token is None:
@@ -161,6 +166,8 @@ async def test_fetch_jira_paginates_and_builds_documents(monkeypatch):
     assert issue["metadata"]["url"] == "https://charanb.atlassian.net/browse/ENG-1"
     assert "Broken since v2" in issue["content"]
     assert "Status: In Progress" in issue["content"]
+    # Custom fields from the list view make it into the document.
+    assert "Team: Squad B" in issue["content"]
 
     comment = docs[1]
     assert comment["metadata"]["data_type"] == "comment"
@@ -208,6 +215,8 @@ class _SearchGoneClient:
         ]
 
     async def get(self, url, params=None):
+        if url.endswith("/rest/api/3/field"):
+            return _FakeResponse([{"id": "customfield_10019", "name": "Team", "custom": True}])
         if url.endswith("/rest/api/3/search/jql"):
             gone = _FakeResponse({}, status=410)
             gone.raise_for_status = _raise_gone

@@ -543,6 +543,34 @@ def _adf_text(node) -> str:
     return body
 
 
+def _jira_field_value(raw) -> str:
+    """Turn a Jira field value into plain searchable text, whatever its shape.
+
+    Custom fields are polymorphic: plain strings, numbers, ADF documents,
+    select options ({value}), cascading options, user pickers ({displayName}),
+    and arrays of any of those.
+    """
+    if raw is None:
+        return ""
+    if isinstance(raw, str):
+        return raw.strip()
+    if isinstance(raw, bool):
+        return "Yes" if raw else "No"
+    if isinstance(raw, (int, float)):
+        return str(raw)
+    if isinstance(raw, list):
+        return ", ".join(v for v in (_jira_field_value(i) for i in raw) if v)
+    if isinstance(raw, dict):
+        if raw.get("type") == "doc":
+            return _adf_text(raw).strip()
+        if raw.get("value"):
+            return str(raw["value"])
+        if raw.get("displayName"):
+            return str(raw["displayName"])
+        return ""
+    return ""
+
+
 async def _issues_via_board(client, base: str, project_key: str, fields: str) -> list[dict]:
     """
     Confluence boards read issues without the JQL search index. Some brand-new
@@ -597,10 +625,25 @@ async def fetch_jira(base_url: str, email: str, api_token: str, project_key: str
     headers = {"Authorization": f"Basic {creds}", "Accept": "application/json"}
     base = base_url.rstrip("/")
     key = project_key.strip().upper()
-    fields = "summary,description,status,priority,labels,assignee,comment,created,updated"
+    # *all means the list view's columns (custom fields like cf[10019]) come
+    # back too — they are what the Jira "list" screen sorts on.
+    fields = "*all"
+
+    # customfield_12345 -> its human name, so the doc says "Team: Squad B"
+    # instead of "customfield_10019: Squad B". Degrades to {} on any failure.
+    field_names: dict[str, str] = {}
 
     issues: list[dict] = []
     async with httpx.AsyncClient(headers=headers, timeout=30) as client:
+        try:
+            fresp = await client.get(f"{base}/rest/api/3/field")
+            if fresp.status_code == 200:
+                field_names = {
+                    f["id"]: f["name"]
+                    for f in fresp.json() if f.get("custom")
+                }
+        except httpx.HTTPError:
+            pass
         try:
             # Jira Cloud retired /rest/api/3/search in 2025 (410 Gone); the
             # replacement pages with a token instead of an offset.
@@ -649,6 +692,16 @@ async def fetch_jira(base_url: str, email: str, api_token: str, project_key: str
         desc = _re.sub(r"\n{3,}", "\n\n", _adf_text(f.get("description"))).strip()
         if desc:
             parts.append(f"Description:\n{desc}")
+
+        # List view lives or dies on custom fields — the columns you sort by
+        # are customfield_*. Render every one that has a value.
+        for fid, raw in f.items():
+            if not fid.startswith("customfield_"):
+                continue
+            value = _jira_field_value(raw)
+            if not value:
+                continue
+            parts.append(f"{field_names.get(fid, fid)}: {value}")
 
         results.append({
             "content": "\n".join(parts),

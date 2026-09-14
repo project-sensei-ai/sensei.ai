@@ -8,6 +8,7 @@ import {
   Globe,
   Loader2,
   MessageSquare,
+  Pencil,
   Plus,
   RefreshCw,
   ShieldCheck,
@@ -23,14 +24,17 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet'
 import {
   useAddSourceMutation,
   useDeleteSourceMutation,
   useGetSourcesQuery,
   useGetMyWorkspaceQuery,
   useTriggerIngestMutation,
+  useUpdateSourceMutation,
   useUploadFileMutation,
   type Source,
+  type UpdateSourceInput,
 } from '@/services/onboardingApi'
 
 // ── Status config ──────────────────────────────────────────────────────────────
@@ -54,11 +58,123 @@ const TYPE_ICON: Record<string, React.ReactNode> = {
 
 // ── Source card ────────────────────────────────────────────────────────────────
 
+function EditSourceDialog({ source, onClose }: { source: Source; onClose: () => void }) {
+  const [updateSource, { isLoading }] = useUpdateSourceMutation()
+  const [triggerIngest] = useTriggerIngestMutation()
+  const [err, setErr] = useState('')
+  const cfg = source.config as Record<string, any>
+
+  // Secrets are never returned by the API, so the secret field starts blank
+  // and a blank one means "keep what is stored".
+  const [form, setForm] = useState(() =>
+    source.type === 'jira'
+      ? { base_url: cfg.base_url ?? '', email: cfg.email ?? '', project_key: cfg.project_key ?? '', api_token: '' }
+      : { channel: cfg.channel_name ?? '', token: '' },
+  )
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    setErr('')
+    const body: UpdateSourceInput =
+      source.type === 'jira'
+        ? {
+            type: 'jira',
+            base_url: form.base_url.trim(),
+            email: form.email.trim(),
+            project_key: form.project_key.trim().toUpperCase(),
+            api_token: form.api_token || undefined,
+          }
+        : {
+            type: 'slack',
+            channel: form.channel,
+            token: form.token || undefined,
+          }
+    try {
+      await updateSource({ id: source.id, body }).unwrap()
+      await triggerIngest(source.id).unwrap().catch(() => {})
+      onClose()
+    } catch (e: any) {
+      setErr(errorMessage(e))
+    }
+  }
+
+  const setField = (k: string) => (e: React.ChangeEvent<HTMLInputElement>) =>
+    setForm((f) => ({ ...(f as any), [k]: e.target.value }))
+
+  return (
+    <Sheet open onOpenChange={(o) => !o && onClose()}>
+      <SheetContent className="w-full">
+        <SheetHeader>
+          <SheetTitle>{source.type === 'jira' ? 'Edit Jira source' : 'Edit Slack source'}</SheetTitle>
+          <SheetDescription>
+            {source.type === 'jira'
+              ? 'Change the site, project, or credentials. The source will be re-indexed after saving.'
+              : 'Change the channel or bot token. The source will be re-indexed after saving.'}
+          </SheetDescription>
+        </SheetHeader>
+
+        <form onSubmit={handleSubmit} className="flex flex-col gap-4 px-4">
+          {source.type === 'jira' ? (
+            <>
+              <div className="flex flex-col gap-1.5">
+                <Label>Jira site</Label>
+                <Input placeholder="https://your-org.atlassian.net"
+                  value={form.base_url} onChange={setField('base_url')} required disabled={isLoading} />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label>Account email</Label>
+                <Input type="email" placeholder="agent@your-org.com"
+                  value={form.email} onChange={setField('email')} required disabled={isLoading} />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label>Project key</Label>
+                <Input placeholder="PROJ"
+                  value={form.project_key} onChange={setField('project_key')} required disabled={isLoading} />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label>API token <span className="text-xs font-normal text-muted-foreground">(blank = keep stored)</span></Label>
+                <Input type="password" placeholder="Paste only if it changed"
+                  value={form.api_token} onChange={setField('api_token')} disabled={isLoading} />
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="flex flex-col gap-1.5">
+                <Label>Channel</Label>
+                <Input placeholder="general"
+                  value={form.channel} onChange={setField('channel')} required disabled={isLoading} />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label>Bot token <span className="text-xs font-normal text-muted-foreground">(blank = keep stored)</span></Label>
+                <Input type="password" placeholder="xoxb-… — only if it changed"
+                  value={form.token} onChange={setField('token')} disabled={isLoading} />
+              </div>
+            </>
+          )}
+
+          {err && <p className="text-sm text-destructive">{err}</p>}
+
+          <div className="flex justify-end gap-2 mt-2">
+            <Button type="button" variant="outline" size="sm" onClick={onClose} disabled={isLoading}>
+              Cancel
+            </Button>
+            <Button type="submit" size="sm" disabled={isLoading}>
+              {isLoading ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Saving…</> : 'Save & Re-index'}
+            </Button>
+          </div>
+        </form>
+      </SheetContent>
+    </Sheet>
+  )
+}
+
 function SourceCard({ source, canManage }: { source: Source; canManage: boolean }) {
   const [triggerIngest, { isLoading: ingesting }] = useTriggerIngestMutation()
   const [deleteSource, { isLoading: deleting }] = useDeleteSourceMutation()
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [editing, setEditing] = useState(false)
   const cfg = STATUS_CONFIG[source.status] ?? STATUS_CONFIG.pending
+  const editable = source.type === 'jira' || source.type === 'slack'
 
   async function handleDelete() {
     if (!confirmDelete) { setConfirmDelete(true); return }
@@ -91,6 +207,12 @@ function SourceCard({ source, canManage }: { source: Source; canManage: boolean 
           {cfg.icon} {cfg.label}
         </Badge>
 
+        {canManage && editable && (
+          <Button size="sm" variant="outline" className="h-7 gap-1 text-xs" onClick={() => setEditing(true)}>
+            <Pencil className="h-3 w-3" /> Edit
+          </Button>
+        )}
+
         {canManage && (
           <Button size="sm" variant="outline" className="h-7 gap-1 text-xs"
             disabled={ingesting} onClick={() => triggerIngest(source.id)}>
@@ -116,6 +238,10 @@ function SourceCard({ source, canManage }: { source: Source; canManage: boolean 
           </Button>
         )}
       </div>
+
+      {editing && canManage && editable && (
+        <EditSourceDialog source={source} onClose={() => setEditing(false)} />
+      )}
     </div>
   )
 }
