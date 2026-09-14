@@ -26,7 +26,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request,
 from pydantic import BaseModel, Field
 
 from auth.deps import get_current_user
-from agent.agent import mark_exhausted, pick_groq_model
+from agent.agent import bench_for
 from core.errors import humanise, is_quota_error, model_named_in
 from db.chroma import get_chroma
 from db.database import get_db
@@ -146,7 +146,7 @@ async def hear(meeting_id: str, body: UtteranceIn, request: Request,
             break
         except Exception as exc:
             if attempt == 0 and is_quota_error(exc):
-                mark_exhausted(pick_groq_model(background=True))
+                bench_for(exc, background=True)
                 continue
             reply = listener.Reply(kind="silent", reason=f"could not judge it: {humanise(exc)}", trigger=utterance["text"])
     if reply is None:

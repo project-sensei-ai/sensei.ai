@@ -14,7 +14,7 @@ from answers import store as answer_store
 from artifacts.routes import serialize_artifact
 from auth.deps import get_current_user
 from core.errors import humanise, is_quota_error, is_rate_limit_error, model_named_in
-from agent.agent import mark_exhausted, model_available, pick_model
+from agent.agent import mark_exhausted, model_available, pick_model, rest_after
 from db.chroma import get_chroma
 from db.database import get_db
 from db.membership import require_workspace, visible_sources
@@ -331,7 +331,7 @@ async def stream_message(
                     # has been said yet and one is actually available.
                     key = getattr(col.agent.model, "sensei_key", None) or model_named_in(exc)
                     if model_available(key):
-                        mark_exhausted(key, 3600 if daily else 75)
+                        mark_exhausted(key, rest_after(exc))
                     next_key = pick_model(background=False)[0]
                     if (answer_parts or attempt == MAX_MODEL_SWITCHES or next_key == key
                             or not model_available(next_key)):

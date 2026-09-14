@@ -789,6 +789,47 @@ def make_inventory_tool(workspace_id: str, chroma_client, allowed_sources: list[
     return list_project_knowledge
 
 
+_TOOL_NAMES = re.compile(
+    r"\b(?:according to|in|on|from|inside)?\s*(?:the\s+)?"
+    r"(?:confluence|jira|github|gitlab|slack|notion|google drive|sharepoint)\b",
+    re.I,
+)
+
+
+def without_tool_names(query: str) -> str:
+    """The question with the names of the tools it came through taken out."""
+    cleaned = re.sub(r"\s+", " ", _TOOL_NAMES.sub(" ", query)).strip(" ,")
+    return cleaned if len(cleaned) >= 12 else query
+
+
+def interleave(rankings: list[list[tuple]], n: int, per_page: int = 2) -> list[tuple]:
+    """
+    Take from each ranking in turn, skipping repeats and any page that already
+    holds `per_page` places. Rows are (chunk_id, document, metadata, distance).
+    """
+    out: list[tuple] = []
+    seen: set = set()
+    per: dict = {}
+    iterators = [iter(r) for r in rankings]
+    while iterators and len(out) < n:
+        for it in list(iterators):
+            for row in it:
+                chunk_id, _doc, meta, _dist = row
+                page = (meta.get("source_label"),
+                        meta.get("title") or meta.get("path") or meta.get("url") or chunk_id)
+                if chunk_id in seen or per.get(page, 0) >= per_page:
+                    continue
+                seen.add(chunk_id)
+                per[page] = per.get(page, 0) + 1
+                out.append(row)
+                break
+            else:
+                iterators.remove(it)
+            if len(out) >= n:
+                break
+    return out
+
+
 def make_search_tool(
     workspace_id: str,
     chroma_client,
@@ -829,23 +870,8 @@ def make_search_tool(
     # compound into daily token caps.
     MAX_SEARCHES = budget
 
-    @tool
-    def search_project_docs(query: str) -> str:
-        """
-        Search the indexed project knowledge base for content relevant to the query.
-        Returns the most relevant passages from indexed sources (GitHub repos, files, URLs, Confluence).
-        Call this for ANY question about the project, codebase, team, architecture, commits, or documentation.
-        Do NOT call this for general knowledge questions unrelated to the project.
-        """
-        calls["n"] += 1
-        if calls["n"] > MAX_SEARCHES:
-            return (
-                f"Search budget reached ({MAX_SEARCHES} searches). Do not search again. "
-                "Answer the user now from the passages you have already been given. "
-                "If they do not cover the question, say plainly that the workspace "
-                "does not contain that information."
-            )
-
+    def unmetered(query: str) -> str:
+        """The search itself, outside the per-turn budget: retrieval done on the model's behalf."""
         collection = get_workspace_collection(chroma_client, workspace_id)
         count = collection.count()
         if count == 0:
@@ -854,13 +880,13 @@ def make_search_tool(
         # Chunks are small enough to fit the embedder's window, so ask for more of
         # them — a section's answer is often split across two neighbouring chunks.
         n = min(n_results, count)
+        fetch = min(count, max(n * 3, 12))
         # Filtering happens in the query, not after it. Retrieving everything and
         # then discarding what the asker may not see would mean a restricted
         # person gets fewer results rather than different ones — and would leak
         # the existence of the rest through the gaps.
         query_args = {
-            "query_texts": [query],
-            "n_results": n,
+            "n_results": fetch,
             "include": ["documents", "metadatas", "distances"],
         }
         clauses = []
@@ -878,12 +904,21 @@ def make_search_tool(
         elif clauses:
             query_args["where"] = {"$and": clauses}
 
-        results = collection.query(**query_args)
-
-        ids = results["ids"][0]
-        docs = results["documents"][0]
-        metadatas = results["metadatas"][0]
-        distances = results["distances"][0]
+        # Naming the tool ("according to Confluence", "the GitHub repo") pulls in
+        # pages that are about the tool itself: Confluence's own getting-started
+        # pages filled every place for a deployment question and the runbook was
+        # not among them. So the question is searched as asked and without those
+        # names, the two rankings are interleaved, and no page takes more than
+        # two places.
+        rankings = []
+        for q in dict.fromkeys([without_tool_names(query), query]):
+            r = collection.query(query_texts=[q], **query_args)
+            rankings.append(list(zip(r["ids"][0], r["documents"][0], r["metadatas"][0], r["distances"][0])))
+        picked = interleave(rankings, n, per_page=2)
+        ids = [row[0] for row in picked]
+        docs = [row[1] for row in picked]
+        metadatas = [row[2] for row in picked]
+        distances = [row[3] for row in picked]
 
         if not docs:
             return "No relevant content found for this query."
@@ -919,6 +954,27 @@ def make_search_tool(
 
         return "\n\n---\n\n".join(passages)
 
+    @tool
+    def search_project_docs(query: str) -> str:
+        """
+        Search the indexed project knowledge base for content relevant to the query.
+        Returns the most relevant passages from indexed sources (GitHub repos, files, URLs, Confluence).
+        Call this for ANY question about the project, codebase, team, architecture, commits, or documentation.
+        Do NOT call this for general knowledge questions unrelated to the project.
+        """
+        calls["n"] += 1
+        if calls["n"] > MAX_SEARCHES:
+            return (
+                f"Search budget reached ({MAX_SEARCHES} searches). Do not search again. "
+                "Answer the user now from the passages you have already been given. "
+                "If they do not cover the question, say plainly that the workspace "
+                "does not contain that information."
+            )
+        return unmetered(query)
+
+    # Retrieval Sensei does before the model runs must not spend the model's
+    # own searches.
+    search_project_docs.unmetered = unmetered
     return search_project_docs, captured
 
 

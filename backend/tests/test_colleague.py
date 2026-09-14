@@ -265,3 +265,62 @@ def test_a_long_rest_on_every_model_is_reported_not_waited_out(monkeypatch):
     assert event.retry is False
     assert notices == []
     a._EXHAUSTED.clear()
+
+
+def test_tool_names_are_taken_out_of_the_search():
+    from agent.tools import without_tool_names
+    assert without_tool_names(
+        "Which Confluence pages do we have about deployment, and what is the production deploy window?"
+    ) == "Which pages do we have about deployment, and what is the production deploy window?"
+    assert without_tool_names("According to Confluence, who is on call the week of 15 September?") == \
+        "who is on call the week of 15 September?"
+    assert without_tool_names("Who owns the routing worker?") == "Who owns the routing worker?"
+
+
+def test_rankings_are_interleaved_and_no_page_takes_every_place():
+    from agent.tools import interleave
+
+    def row(cid, title, distance):
+        return (cid, "doc", {"source_label": "Confluence: personal space", "title": title}, distance)
+
+    noisy = [row("a1", "Getting started", .40), row("a2", "Getting started", .41),
+             row("a3", "Getting started", .42), row("b1", "Explore", .43)]
+    focused = [row("r1", "Deployment runbook", .50), row("a1", "Getting started", .60)]
+    assert [r[0] for r in interleave([focused, noisy], 4, per_page=2)] == ["r1", "a1", "a2", "b1"]
+
+
+def test_searching_before_the_model_does_not_spend_its_searches(monkeypatch):
+    import db.chroma
+    from agent.tools import make_search_tool
+
+    class Collection:
+        def count(self):
+            return 3
+
+        def query(self, query_texts, n_results, include, where=None):
+            rows = [(f"c{i}", f"passage {i}", {"source_label": "Confluence: SD", "title": f"Page {i}"}, 0.1 * i)
+                    for i in range(3)]
+            return {"ids": [[r[0] for r in rows]], "documents": [[r[1] for r in rows]],
+                    "metadatas": [[r[2] for r in rows]], "distances": [[r[3] for r in rows]]}
+
+    monkeypatch.setattr(db.chroma, "get_workspace_collection", lambda client, ws: Collection())
+    search, _ = make_search_tool("ws", None, n_results=1, budget=1)
+    assert "passage 0" in search.unmetered("deploy window")
+    assert "budget" not in search(query="release captain").lower()
+    assert "budget reached" in search(query="on call").lower()
+
+
+def test_a_limit_rests_the_model_it_names_not_the_first_in_line(monkeypatch):
+    import time
+    from agent import agent as a
+    a._EXHAUSTED.clear()
+    chain = [("groq/openai/gpt-oss-120b", "groq", "u", "openai/gpt-oss-120b"),
+             ("groq/openai/gpt-oss-20b", "groq", "u", "openai/gpt-oss-20b")]
+    monkeypatch.setattr(a, "model_chain", lambda background: chain)
+    key = a.bench_for(Exception(
+        "Rate limit reached for model `openai/gpt-oss-20b` on tokens per minute (TPM). Please try again in 13.8s."),
+        background=True)
+    assert key == "groq/openai/gpt-oss-20b"
+    assert a.model_available("groq/openai/gpt-oss-120b")
+    assert 13 < a._EXHAUSTED[key] - time.time() <= 15
+    a._EXHAUSTED.clear()

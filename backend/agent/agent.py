@@ -35,13 +35,15 @@ async def retry_on_quota(fn, *args, **kwargs):
     model and run it once more. Agents are built inside `fn`, so the retry
     picks up the fallback automatically.
     """
-    from core.errors import is_quota_error, model_named_in
+    from core.errors import is_quota_error
     try:
         return await fn(*args, **kwargs)
     except Exception as exc:
         if not is_quota_error(exc):
             raise
-        mark_exhausted(pick_groq_model(background=True))
+        # Rest the model that failed. Resting "the first background model" for an
+        # hour took healthy models out of chat after one background hiccup.
+        bench_for(exc, background=True)
         return await fn(*args, **kwargs)
 
 
@@ -120,6 +122,27 @@ def seconds_until_available(background: bool) -> float | None:
         return None
     now = time.time()
     return max(0.0, min(_EXHAUSTED.get(key, 0.0) - now for key, *_ in chain))
+
+
+def rest_after(exc) -> float:
+    """How long a model rests after this error: a daily cap, a request it can never fit, or what the provider asked."""
+    from core.errors import retry_after_seconds
+    text = str(exc)
+    if _DAILY.search(text):
+        return 3600.0
+    if "request too large" in text.lower():
+        return 600.0
+    return (retry_after_seconds(exc) or 60.0) + 1.0
+
+
+def bench_for(exc, background: bool) -> str | None:
+    """Rest the model an error names, for as long as that error calls for."""
+    from core.errors import model_named_in
+    named = model_named_in(exc)
+    key = next((e[0] for e in model_chain(background) + model_chain(not background)
+                if named and e[3] == named), None) or pick_model(background)[0]
+    mark_exhausted(key, rest_after(exc))
+    return key
 
 
 def providers_status() -> list[dict]:
@@ -305,14 +328,7 @@ class ModelFailover(HookProvider):
             return
 
         current = getattr(event.agent.model, "sensei_key", None)
-        text = str(exc)
-        if _DAILY.search(text):
-            rest = 3600.0
-        elif "request too large" in text.lower():
-            rest = 600.0
-        else:
-            rest = (said or 60.0) + 1.0
-        mark_exhausted(current, rest)
+        mark_exhausted(current, rest_after(exc))
 
         entry = next((e for e in model_chain(self.background) if _usable(e[0])), None)
         if entry is None:
@@ -492,7 +508,7 @@ def build_colleague(
 
     col = Colleague(
         agent=Agent(**kwargs),
-        search=search_tool,
+        search=search_tool.unmetered,
         failover=failover,
         citations=captured,
         artifacts=produced,
