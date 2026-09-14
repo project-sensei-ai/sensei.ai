@@ -85,9 +85,10 @@ chromadb plus the embedding model will OOM at 512 MB.
 | `MONGO_DB_NAME` | yes | defaults to `sensei` |
 | `JWT_SECRET` | yes | signs session cookies |
 | `SECRET_ENCRYPTION_KEY` | yes | encrypts source credentials and tool-grant tokens at rest |
-| `GROQ_API_KEY` | unless Bedrock | development / default backend |
+| `ANTHROPIC_API_KEY` | recommended | paid Claude; answers first, free tiers become fallbacks |
+| `GROQ_API_KEY` | unless Bedrock or Anthropic | free development backend, 200k tokens a day per model |
 | `GROQ_FALLBACK_MODELS` | no | comma list tried when a model's daily quota is exhausted |
-| `MAX_GRANT_TOOLS_PER_TURN` | no | granted MCP tools offered per question, only those it touches (default 8) |
+| `MAX_GRANT_TOOLS_PER_TURN` | no | granted MCP tools offered per question, only those it touches (default 4) |
 | `FRONTEND_ORIGIN` | yes | host used to build invite links |
 | `STATIC_DIR` | yes in Docker | `/app/static`; unset locally so the API runs alone |
 | `CHROMA_PERSIST_DIR` | yes | put it on a persistent volume |

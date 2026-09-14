@@ -101,6 +101,9 @@ def max_output_tokens(model_id: str, background: bool) -> int:
 # is present, so an exhausted Groq day falls through to Cerebras, then Gemini,
 # then OpenRouter, without anyone editing a flag.
 _PROVIDERS = [
+    # Anthropic is the one paid provider; when its key is present it goes first
+    # and the free tiers only carry the load if it is unavailable.
+    ("anthropic", None, "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "ANTHROPIC_BACKGROUND_MODEL"),
     ("groq", GROQ_BASE, "GROQ_API_KEY", "GROQ_MODEL", "GROQ_BACKGROUND_MODEL"),
     ("cerebras", "https://api.cerebras.ai/v1", "CEREBRAS_API_KEY", "CEREBRAS_MODEL", "CEREBRAS_BACKGROUND_MODEL"),
     ("gemini", "https://generativelanguage.googleapis.com/v1beta/openai/", "GEMINI_API_KEY", "GEMINI_MODEL", "GEMINI_BACKGROUND_MODEL"),
@@ -310,6 +313,16 @@ def _build_model(background: bool = False, entry: tuple | None = None):
         )
     from strands.models.openai import OpenAIModel
     key, provider, base_url, model_id = entry or pick_model(background)
+    if provider == "anthropic":
+        from strands.models.anthropic import AnthropicModel
+        model = AnthropicModel(
+            client_args={"api_key": settings.ANTHROPIC_API_KEY, "max_retries": 0,
+                         "timeout": 120.0 if background else 60.0},
+            model_id=model_id,
+            max_tokens=max_output_tokens(model_id, background),
+        )
+        model.sensei_key = key
+        return model
     api_key = {
         "groq": settings.GROQ_API_KEY, "cerebras": settings.CEREBRAS_API_KEY,
         "gemini": settings.GEMINI_API_KEY, "openrouter": settings.OPENROUTER_API_KEY,

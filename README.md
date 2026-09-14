@@ -109,6 +109,11 @@ DEBUG=true                  # drops the Secure cookie flag so login works over H
 > Losing `SECRET_ENCRYPTION_KEY` makes existing sources and tool grants
 > unreadable — they have to be reconnected.
 
+**Paid Claude:** set `ANTHROPIC_API_KEY` (console.anthropic.com) and Claude
+Sonnet 5 answers chat with Haiku 4.5 on background work; the free tiers below
+become fallbacks. Groq's free tier allows 200,000 tokens a day per model, which
+a demo day of testing uses up.
+
 **Free hosted fallbacks:** set any of `CEREBRAS_API_KEY` (cloud.cerebras.ai,
 1M tokens/day), `GEMINI_API_KEY` (aistudio.google.com) or `OPENROUTER_API_KEY`
 and they join the chain behind Groq. No card, no local model.
@@ -192,9 +197,9 @@ from documentation with transcripts excluded.
 
 **Model backends.** One flag: `LLM_BACKEND=bedrock | groq | ollama`.
 Background agents run a smaller model than interactive chat. On the hosted
-free tiers, a chain routes around any model whose quota is exhausted: Groq's
-models first, then Cerebras, Gemini and OpenRouter — each joins the chain when
-its key is present. A quota error marks that model out for an hour and the
+free tiers, a chain routes around any model whose quota is exhausted: Claude
+first when an Anthropic key is set, then Groq's models, then Cerebras, Gemini
+and OpenRouter — each joins the chain when its key is present. A quota error marks that model out for an hour and the
 turn retries on the next.
 
 ---

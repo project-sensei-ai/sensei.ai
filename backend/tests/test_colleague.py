@@ -326,3 +326,26 @@ def test_a_limit_rests_the_model_it_names_not_the_first_in_line(monkeypatch):
     assert a.model_available("groq/openai/gpt-oss-120b")
     assert 13 < a._EXHAUSTED[key] - time.time() <= 15
     a._EXHAUSTED.clear()
+
+
+def test_claude_answers_first_when_an_anthropic_key_is_set(monkeypatch):
+    from agent import agent as a
+    monkeypatch.setattr(a.settings, "ANTHROPIC_API_KEY", "sk-ant-test")
+    monkeypatch.setattr(a.settings, "GROQ_API_KEY", "g")
+    chat = a.model_chain(background=False)
+    background = a.model_chain(background=True)
+    assert chat[0][1] == "anthropic" and chat[0][3] == a.settings.ANTHROPIC_MODEL
+    assert background[0][3] == a.settings.ANTHROPIC_BACKGROUND_MODEL
+    assert chat[1][1] == "groq"
+    monkeypatch.setattr(a.settings, "ANTHROPIC_API_KEY", "")
+    assert a.model_chain(background=False)[0][1] == "groq"
+
+
+def test_an_anthropic_entry_builds_a_claude_model(monkeypatch):
+    from agent import agent as a
+    monkeypatch.setattr(a.settings, "ANTHROPIC_API_KEY", "sk-ant-test")
+    monkeypatch.setattr(a.settings, "LLM_BACKEND", "groq")
+    model = a._build_model(background=False, entry=("anthropic/claude-sonnet-5", "anthropic", None, "claude-sonnet-5"))
+    assert type(model).__name__ == "AnthropicModel"
+    assert model.sensei_key == "anthropic/claude-sonnet-5"
+    assert model.config["model_id"] == "claude-sonnet-5" and model.config["max_tokens"] == a.CHAT_OUTPUT_TOKENS

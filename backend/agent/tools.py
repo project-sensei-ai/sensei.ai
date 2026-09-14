@@ -519,6 +519,10 @@ _BLOCK_NODES = {
 
 
 def _adf_text(node) -> str:
+    if isinstance(node, str):
+        # The agile board API hands descriptions and comments over as plain
+        # wiki text rather than ADF; the words are the words either way.
+        return node
     if isinstance(node, list):
         return "".join(_adf_text(n) for n in node)
     if not isinstance(node, dict):
@@ -598,26 +602,25 @@ async def fetch_jira(base_url: str, email: str, api_token: str, project_key: str
     issues: list[dict] = []
     async with httpx.AsyncClient(headers=headers, timeout=30) as client:
         try:
-            start_at = 0
-            # One page of 50 silently truncated bigger projects, same cap as Confluence.
+            # Jira Cloud retired /rest/api/3/search in 2025 (410 Gone); the
+            # replacement pages with a token instead of an offset.
+            token = None
             while len(issues) < 300:
-                resp = await client.get(f"{base}/rest/api/3/search", params={
-                    "jql": f"project = {key}",
-                    "fields": fields,
-                    "maxResults": 50,
-                    "startAt": start_at,
-                })
+                params = {"jql": f"project = {key}", "fields": fields, "maxResults": 50}
+                if token:
+                    params["nextPageToken"] = token
+                resp = await client.get(f"{base}/rest/api/3/search/jql", params=params)
                 resp.raise_for_status()
                 payload = resp.json()
                 batch = payload.get("issues", [])
                 issues.extend(batch)
-                if not batch or start_at + len(batch) >= (payload.get("total") or len(batch)):
+                token = payload.get("nextPageToken")
+                if not batch or payload.get("isLast", True) or not token:
                     break
-                start_at += len(batch)
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code not in (410, 404):
                 raise
-            # New sites can serve 410 Gone on /search until the index builds;
+            # A site without the new endpoint yet, or with no search index:
             # the agile board API lists issues without it.
             issues = await _issues_via_board(client, base, key, fields)
 

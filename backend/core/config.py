@@ -20,6 +20,11 @@ class Settings(BaseSettings):
     GOOGLE_CLIENT_ID: str = ""
 
     # Agent / Vector store
+    # Paid and dependable: with an Anthropic key set, Claude answers first and
+    # the free-tier chain below becomes the fallback instead of the only path.
+    ANTHROPIC_API_KEY: str = ""
+    ANTHROPIC_MODEL: str = "claude-sonnet-5"
+    ANTHROPIC_BACKGROUND_MODEL: str = "claude-haiku-4-5-20251001"
     GROQ_API_KEY: str = ""
     # Interactive chat gets the capable model. Background agents — the ones that
     # research briefs and audit for gaps — run a smaller one: they do bounded,
