@@ -131,7 +131,7 @@ cd frontend && npm install && npm run dev    # second terminal
 
 http://localhost:5173. No AWS account needed — `LLM_BACKEND` defaults to Groq.
 
-**Tests:** `cd backend && python -m pytest -q` — 48 tests, no model calls,
+**Tests:** `cd backend && python -m pytest -q` — 84 tests, no model calls,
 under half a second. They cover the judgement: which tools are permitted,
 which are offered, and when the agent speaks in a meeting.
 

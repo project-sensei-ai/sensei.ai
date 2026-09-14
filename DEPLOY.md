@@ -87,7 +87,7 @@ chromadb plus the embedding model will OOM at 512 MB.
 | `SECRET_ENCRYPTION_KEY` | yes | encrypts source credentials and tool-grant tokens at rest |
 | `GROQ_API_KEY` | unless Bedrock | development / default backend |
 | `GROQ_FALLBACK_MODELS` | no | comma list tried when a model's daily quota is exhausted |
-| `MAX_GRANT_TOOLS_PER_TURN` | no | granted MCP tools offered per question (default 12) |
+| `MAX_GRANT_TOOLS_PER_TURN` | no | granted MCP tools offered per question, only those it touches (default 8) |
 | `FRONTEND_ORIGIN` | yes | host used to build invite links |
 | `STATIC_DIR` | yes in Docker | `/app/static`; unset locally so the API runs alone |
 | `CHROMA_PERSIST_DIR` | yes | put it on a persistent volume |

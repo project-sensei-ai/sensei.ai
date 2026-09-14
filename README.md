@@ -129,7 +129,7 @@ is one command from a laptop with AWS credentials to a running instance.
 ### Tests
 
 ```bash
-cd backend && python -m pytest -q            # 48 tests, no model calls, ~0.4s
+cd backend && python -m pytest -q            # 84 tests, no model calls, ~0.4s
 
 # browser journeys, against a running server
 E2E_OWNER_PASSWORD=... python -m pytest tests/e2e -q
@@ -139,10 +139,17 @@ E2E_OWNER_PASSWORD=... python -m pytest tests/e2e -q
 
 ## How it works
 
-**Equipping the agent.** Every turn builds a `Colleague`: the index tools,
+**Equipping the agent.** Before the model runs, Sensei searches the sources
+for the question and hands the passages over with it, so most questions are
+answered in a single model call instead of three. Every turn builds a
+`Colleague`: the index tools,
 the live Jira tools when an Atlassian credential exists, the work tools, and
-the dozen most relevant tools from the owner's MCP grants — a server like
+up to eight connected tools the question actually touches — a server like
 GitHub exposes fifty, and their schemas cost more tokens than the question.
+When a model refuses a call at its per-minute limit, the turn moves onto the
+next model with room and makes the same call again, keeping what it has
+already gathered. A quiet spell gets a "still working" notice, and no question
+waits past two and a half minutes.
 MCP sessions are pooled across turns and closed off the event loop.
 
 **The write gate.** `WriteGate` is a Strands `HookProvider` on
@@ -198,7 +205,7 @@ backend/
 ├── core/           config · security · secrets · mailer · errors
 ├── db/             membership.py is the single access rule
 ├── scripts/        seed_confluence.py · seed_apollo.py — the demo projects, built through the API
-└── tests/          48 unit tests + 7 browser journeys
+└── tests/          84 unit tests + 7 browser journeys
 frontend/src/pages/ Dashboard · Brief · Gaps · Answers · Trust · Sources · Tools · Meetings · Chat
 deploy/             docker-compose.prod.yml · Caddyfile · launch-ec2.sh
 ```
