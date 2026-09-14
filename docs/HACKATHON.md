@@ -47,7 +47,7 @@ Every item below is required — missing any risks disqualification:
 - [x] **MIT or Apache license file at repo root**, detectable in the GitHub About section
 - [x] README
 - [x] **Architecture diagram** — `docs/assets/architecture.png`
-- [ ] Demo video, **max 5 minutes**, public on YouTube/Vimeo — script in `docs/SUBMISSION.md`, containing:
+- [x] Demo video, **max 5 minutes**, public on YouTube/Vimeo — https://youtu.be/mr-HfgibJd8 (4:58, script in `docs/DEMO_SCRIPT.md`), containing:
   - Working-project demonstration
   - Pitch covering all three: **(1) problem, (2) who it's for, (3) why it matters**
   - Slides/screen recording/voiceover fine — camera not needed

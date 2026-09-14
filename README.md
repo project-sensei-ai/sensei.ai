@@ -13,6 +13,8 @@ Agents for Humans hackathon, Professional Agents track.
 **Live demo:** https://54-80-119-54.sslip.io — log in with the accounts in
 [TESTING.md](TESTING.md); a real sample project is already onboarded.
 
+**Demo video (5 min):** https://youtu.be/mr-HfgibJd8
+
 ![Architecture](docs/assets/architecture.png)
 
 - **[TESTING.md](TESTING.md)** — two demo projects, two owners, what to try

@@ -106,6 +106,11 @@ Maya (owner) and Priya (member). Rehearse; do not narrate errors.
 | 4:20–4:50 | Architecture diagram; code flash of `@tool`, `MCPClient`, `BeforeToolCallEvent`, `GraphBuilder`, `structured_output_async` | "Built on Strands: custom tools and MCP tools in one loop, a hook that enforces the write gate, a three-agent graph for research, typed outputs everywhere, streaming to the UI. One container on AWS." |
 | 4:50–5:00 | Live URL + repo on screen | "Sensei. Onboard it like a colleague." |
 
+## Demo video
+
+https://youtu.be/mr-HfgibJd8 (4:58, public). Recorded from the live site with the
+voiceover in `docs/DEMO_SCRIPT.md`.
+
 ## Judge instructions (paste into "Testing instructions")
 
 Live: https://54-80-119-54.sslip.io (see `TESTING.md` in the repo). Two projects, two owners:
