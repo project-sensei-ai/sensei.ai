@@ -50,6 +50,19 @@ ends it writes the notes — decisions, action items, open questions — and
 indexes them, so next week's "what did we decide" is answerable with a citation
 to the meeting.
 
+### In Slack
+
+Add the Slack app to a channel and Sensei is in the room there too. It reads
+what people post and indexes it as it arrives, so a decision made at 10:02 can
+be asked about at 10:03. It answers when mentioned or messaged directly, and it
+answers a question nobody addressed to it only when the project's sources can
+cite the answer, in the message's thread, with the sources named. Everything
+else it leaves alone. A mention it cannot answer goes to the Answers ledger for
+an owner to close. Setup: point the Slack app's Event Subscriptions at
+`https://<host>/api/slack/events`, subscribe the bot to `app_mention`,
+`message.channels` and `message.im`, and put the app's signing secret in
+`SLACK_SIGNING_SECRET` so the endpoint can prove requests came from Slack.
+
 ---
 
 ### Onboarding is a conversation
@@ -135,7 +148,7 @@ is one command from a laptop with AWS credentials to a running instance.
 ### Tests
 
 ```bash
-cd backend && python -m pytest -q            # 156 tests, no model calls, ~1s
+cd backend && python -m pytest -q            # 166 tests, no model calls, ~1s
 
 # browser journeys, against a running server
 E2E_OWNER_PASSWORD=... python -m pytest tests/e2e -q
@@ -233,7 +246,7 @@ backend/
 ├── core/           config · security · secrets · mailer · errors
 ├── db/             membership.py is the single access rule
 ├── scripts/        seed_confluence.py · seed_apollo.py — the demo projects, built through the API
-└── tests/          156 unit tests + 7 browser journeys
+└── tests/          166 unit tests + 7 browser journeys
 frontend/src/pages/ Dashboard · Brief · Gaps · Answers · Trust · Sources · Tools · Meetings · Chat
 deploy/             docker-compose.prod.yml · Caddyfile · launch-ec2.sh
 ```

@@ -107,6 +107,11 @@ redirect derivation would change.
 4. On **Tools**, "Reconnect & refresh tools" on the GitHub connection succeeds — the MCP egress works from the box.
 5. Generate an invite link and check the host in it is the deployed URL. If not, `FRONTEND_ORIGIN` is unset.
 6. Start a companion meeting and type one line; the reply arrives. (The mic needs HTTPS, which Caddy provides.)
+7. Slack: in the Slack app's settings (api.slack.com/apps), set **Event Subscriptions → Request URL** to
+   `https://<host>/api/slack/events` (Slack verifies it at once), subscribe the bot to `app_mention`,
+   `message.channels` and `message.im`, save, and reinstall the app if asked. Copy **Basic Information →
+   Signing Secret** into `SLACK_SIGNING_SECRET` in the instance's `backend/.env`; without it the endpoint
+   only checks the Slack team id. Then mention the bot in the synced channel: the reply lands in the thread.
 
 ---
 
@@ -129,5 +134,7 @@ redirect derivation would change.
 | `DEBUG` | no | `false` in production so session cookies are `Secure` |
 | `LLM_BACKEND` | no | `groq` · `bedrock` · `ollama` |
 | `BEDROCK_MODEL_ID`, `BEDROCK_BACKGROUND_MODEL_ID` | Bedrock | cross-region inference profiles, e.g. `us.anthropic.claude-sonnet-4-6` |
+| `SLACK_SIGNING_SECRET` | for Slack replies | lets `/api/slack/events` verify requests came from Slack |
+| `SLACK_PROACTIVE` | no | `true`: answer unaddressed questions in Slack when the sources can cite an answer |
 | `S3_SESSION_BUCKET` | no | persistent conversation memory via `S3SessionManager`; without it the last three exchanges are replayed from the chat |
 | `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | no | prefer an instance role over static keys |

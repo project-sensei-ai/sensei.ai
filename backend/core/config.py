@@ -48,6 +48,13 @@ class Settings(BaseSettings):
     OPENROUTER_API_KEY: str = ""
     OPENROUTER_MODEL: str = "openai/gpt-oss-120b:free"
     OPENROUTER_BACKGROUND_MODEL: str = "openai/gpt-oss-20b:free"
+    # Slack as a place Sensei is spoken to, not only read from. The signing
+    # secret (Slack app → Basic Information) lets the events endpoint prove a
+    # request came from Slack; without it, only the team id is checked.
+    SLACK_SIGNING_SECRET: str = ""
+    # Answer questions nobody addressed to Sensei when the sources can cite an
+    # answer. Off means it only speaks when mentioned or messaged directly.
+    SLACK_PROACTIVE: bool = True
     # How long a project's research findings stay reusable before the agent
     # goes and looks again.
     RESEARCH_TTL_HOURS: int = 24

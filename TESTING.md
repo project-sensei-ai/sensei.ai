@@ -110,8 +110,8 @@ Stated so nothing in the demo is mistaken for more than it is.
 - **Voice in Google Meet.** The bot speaks in the meeting chat. Speaking aloud
   needs a virtual audio device wired into the browser; the companion mode
   speaks aloud on the device running it.
-- **Teams and Slack** — the channel abstraction and the speak-or-stay-quiet
-  rule are written and tested; no transport is connected.
+- **Teams** — the channel abstraction and the speak-or-stay-quiet rule are
+  shared with Slack, which is connected; no Teams transport is.
 - **Per-item ACLs** — visibility is per source per member, not per document.
 - **Jira on the sample site** — the Atlassian site used for the demo has
   Confluence but not Jira. Adding it as a Jira source says exactly that, and

@@ -62,8 +62,9 @@ GRANTS = {
         "credential": "Slack bot token",
         "ceiling": "Every channel this Slack app has been added to",
         "floor": "Messages and replies in the one channel named here",
-        "cannot": ["Post messages", "Channels the app was not added to", "Direct messages"],
+        "cannot": ["Speak unprompted without a source to cite", "Channels the app was not added to"],
         "revoke": "Delete this source, or remove the app from the channel — the invite is the grant",
+        "speaks": "In Slack it answers when mentioned or messaged directly, and answers a question in its thread only when the sources can cite the answer",
         "improve": "Add the app only to the channels this project needs; Slack enforces the rest",
     },
     "url": {

@@ -757,6 +757,8 @@ def build_colleague(
         # ModelFailover handles limits by moving to another model; the SDK's
         # own retries, which sleep on the same one, stay off.
         retry_strategy=None,
+        # Answers reach people through the stream or the channel, not stdout.
+        callback_handler=None,
     )
     if hooks:
         kwargs["hooks"] = hooks
