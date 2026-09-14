@@ -255,6 +255,11 @@ export type AddSourceInput =
   | { type: 'jira'; base_url: string; email: string; api_token: string; project_key: string; label?: string }
   | { type: 'slack'; token: string; channel: string; label?: string }
 
+/** Blank secret = keep the stored one. */
+export type UpdateSourceInput =
+  | { type: 'jira'; base_url: string; email: string; api_token?: string; project_key: string; label?: string }
+  | { type: 'slack'; token?: string; channel: string; label?: string }
+
 // ── Injected endpoints ────────────────────────────────────────────────────────
 
 const onboardingApi = api.injectEndpoints({
@@ -271,6 +276,11 @@ const onboardingApi = api.injectEndpoints({
 
     addSource: builder.mutation<{ source: Source }, AddSourceInput>({
       query: (body) => ({ url: '/sources', method: 'POST', body }),
+      invalidatesTags: ['Source'],
+    }),
+
+    updateSource: builder.mutation<{ source: Source }, { id: string; body: UpdateSourceInput }>({
+      query: ({ id, body }) => ({ url: `/sources/${id}`, method: 'PATCH', body }),
       invalidatesTags: ['Source'],
     }),
 
@@ -462,6 +472,7 @@ export const {
   useCreateWorkspaceMutation,
   useGetMyWorkspaceQuery,
   useAddSourceMutation,
+  useUpdateSourceMutation,
   useUploadFileMutation,
   useGetSourcesQuery,
   useTriggerIngestMutation,
