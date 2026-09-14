@@ -37,7 +37,7 @@ what only the owner of the AWS account can unblock.
 | **9.1** | **Self-interview: readiness score, failures into the ledger** | `agent/readiness.py`, dashboard |
 | — | Provider chain: Groq → Cerebras → Gemini → OpenRouter, per-model quota routing | `agent/agent.py` |
 | — | Two demo projects built through the API | `scripts/seed_confluence.py`, `scripts/seed_apollo.py` |
-| — | 154 unit tests + 7 browser journeys | `backend/tests/` |
+| — | 156 unit tests + 7 browser journeys | `backend/tests/` |
 
 ## Blocked on someone other than the code
 

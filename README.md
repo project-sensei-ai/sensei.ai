@@ -135,7 +135,7 @@ is one command from a laptop with AWS credentials to a running instance.
 ### Tests
 
 ```bash
-cd backend && python -m pytest -q            # 154 tests, no model calls, ~1s
+cd backend && python -m pytest -q            # 156 tests, no model calls, ~1s
 
 # browser journeys, against a running server
 E2E_OWNER_PASSWORD=... python -m pytest tests/e2e -q
@@ -233,7 +233,7 @@ backend/
 ├── core/           config · security · secrets · mailer · errors
 ├── db/             membership.py is the single access rule
 ├── scripts/        seed_confluence.py · seed_apollo.py — the demo projects, built through the API
-└── tests/          154 unit tests + 7 browser journeys
+└── tests/          156 unit tests + 7 browser journeys
 frontend/src/pages/ Dashboard · Brief · Gaps · Answers · Trust · Sources · Tools · Meetings · Chat
 deploy/             docker-compose.prod.yml · Caddyfile · launch-ec2.sh
 ```
