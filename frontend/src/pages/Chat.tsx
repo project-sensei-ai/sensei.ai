@@ -124,13 +124,18 @@ export default function Chat() {
   const sessions = sessionsData?.sessions ?? []
   const storedMessages: (ChatMessage & { error?: boolean })[] = sessionData?.session.messages ?? []
 
-  // Merge stored messages with any optimistic ones not yet persisted
-  const messages = storedMessages.length > 0 ? storedMessages : optimisticMessages
-
-  useEffect(() => {
-    // Clear optimistic messages once the session loads persisted ones
-    if (storedMessages.length > 0) setOptimisticMessages([])
-  }, [storedMessages.length])
+  // Merge stored messages with any optimistic ones not yet persisted, so the
+  // current turn's bubbles show immediately in an existing session instead of
+  // waiting for the refetch. The filter drops optimistic copies once the
+  // refetch brings them back from the DB.
+  const pending = optimisticMessages.filter(
+    (o) => !storedMessages.some(
+      (s) => s.role === o.role
+        && s.content === o.content
+        && (o.citations?.length ?? 0) === (s.citations?.length ?? 0),
+    ),
+  )
+  const messages: (ChatMessage & { error?: boolean })[] = [...storedMessages, ...pending]
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
