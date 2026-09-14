@@ -42,6 +42,16 @@ the compose file already does this from `SENSEI_HOST`.
 `bedrock:InvokeModel` and set `LLM_BACKEND=bedrock` — no static keys on the
 box. The account root cannot call Bedrock; an IAM role or user is required.
 
+**Before launching:** push the branch (the instance clones it from GitHub),
+set `DEBUG=false` in `backend/.env` so session cookies are `Secure`, and make
+sure `ANTHROPIC_API_KEY` is in `backend/.env` — the script bakes that file
+into the instance. The AWS CLI needs credentials in the shell:
+
+```bash
+set -a; source <(grep -E '^AWS_(ACCESS_KEY_ID|SECRET_ACCESS_KEY|REGION)=' backend/.env); set +a
+deploy/launch-ec2.sh feat/agent-onboarding
+```
+
 ## Option B — any Docker host
 
 ```bash
@@ -63,6 +73,29 @@ fly secrets set FRONTEND_ORIGIN="https://<app>.fly.dev"
 
 `fly.toml` sets the volume mount, the health check and 2 GB of memory —
 chromadb plus the embedding model will OOM at 512 MB.
+
+## Option D — frontend on Vercel, backend on AWS
+
+Not needed for the demo: the container already serves the app and the API from
+one origin, which is what the cookie sessions and the OAuth callbacks assume.
+If you want the frontend on Vercel anyway, keep it same-origin from the
+browser's point of view by proxying `/api` through Vercel rewrites, so cookies
+and callbacks keep working unchanged. In `frontend/vercel.json`:
+
+```json
+{
+  "rewrites": [
+    { "source": "/api/:path*", "destination": "https://<backend-host>/api/:path*" },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}
+```
+
+Deploy the `frontend` folder (`npm run build`, output `dist`), then set
+`FRONTEND_ORIGIN=https://<your-vercel-app>.vercel.app` on the backend so invite
+links carry the Vercel host. Do not point the frontend at the API directly
+across origins: the session cookie would need `SameSite=None` and the OAuth
+redirect derivation would change.
 
 ---
 
