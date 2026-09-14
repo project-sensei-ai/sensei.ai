@@ -37,7 +37,9 @@ _DECLINED = re.compile(
     r"not (documented|specified|stated|mentioned|available|covered)|"
     r"do(es)? not (say|specify|mention|state|appear)|"
     r"is ?n'?t (documented|specified|mentioned)|"
-    r"nothing (in|about)|no definitive|not enough information)",
+    r"nothing (in|about)|no definitive|not enough information|"
+    r"(do(es)?n'?t|do(es)? not) (see|have|show|hold|include)|"
+    r"not (in|covered by|part of) (the |our |any )?(project(?:'s)? )?(sources|documentation|docs))",
     re.IGNORECASE,
 )
 

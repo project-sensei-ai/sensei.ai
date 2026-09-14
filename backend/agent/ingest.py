@@ -100,6 +100,15 @@ async def _fetch_source_docs(source: dict) -> list[dict]:
             team_domain=cfg["team_domain"],
         )
 
+    if source["type"] == "meeting":
+        # Already text: the transcript was stored on the source when it was
+        # captured or uploaded. Nothing to fetch.
+        cfg = source["config"]
+        return [{"content": cfg.get("transcript", ""),
+                 "metadata": {"source": "meeting", "data_type": "meeting",
+                              "title": cfg.get("title", "Meeting"),
+                              "held_at": cfg.get("held_at", "")}}]
+
     return []
 
 
@@ -162,12 +171,23 @@ async def write_source_docs(db, chroma_client, source_id: str, raw_docs: list[di
 
     # A source landing is an event worth reacting to: re-audit what the
     # project still has not written down. Debounced inside scan_gaps, so
-    # connecting seven sources does not trigger seven audits.
+    # connecting seven sources does not trigger seven audits. Meeting notes
+    # are excluded: a transcript landing says nothing about documentation.
+    if source["type"] == "meeting":
+        return
     try:
         from agent.gaps import scan_gaps
         await scan_gaps(db, chroma_client, source["workspace_id"])
     except Exception as exc:
         print(f"[gaps] post-ingest audit skipped: {exc}")
+
+    # Then it interviews itself: can it actually answer what a new joiner will
+    # ask? What it cannot goes to the ledger before anyone has to hit the gap.
+    try:
+        from agent.readiness import run_readiness
+        await run_readiness(db, chroma_client, source["workspace_id"])
+    except Exception as exc:
+        print(f"[readiness] post-ingest self-check skipped: {exc}")
 
 
 async def run_ingestion(db, chroma_client, source_id: str) -> None:

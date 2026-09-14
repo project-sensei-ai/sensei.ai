@@ -14,6 +14,8 @@ import {
   FileWarning,
   HelpCircle,
   ShieldCheck,
+  Wrench,
+  Video,
 } from 'lucide-react'
 
 import { api } from '@/services/api'
@@ -63,6 +65,8 @@ const navMain = [
   { title: 'Answers', icon: HelpCircle, to: '/answers' },
   { title: 'Trust', icon: ShieldCheck, to: '/trust' },
   { title: 'Sources', icon: FolderGit2, to: '/sources' },
+  { title: 'Tools', icon: Wrench, to: '/tools' },
+  { title: 'Meetings', icon: Video, to: '/meetings' },
   { title: 'Chat', icon: MessageSquare, to: '/chat' },
 ]
 

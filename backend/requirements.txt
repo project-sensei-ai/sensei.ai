@@ -1,6 +1,6 @@
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
-pydantic==2.10.4
+pydantic==2.13.5
 pydantic-settings==2.7.1
 email-validator==2.2.0
 python-dotenv==1.0.1
@@ -11,17 +11,21 @@ google-auth==2.38.0
 requests==2.32.3
 PyJWT==2.10.1
 bcrypt==4.2.1
-chromadb>=0.6
-strands-agents>=0.1
-openai>=1.0
-groq>=0.13
-pypdf>=5.0
-python-docx>=1.1
-aiofiles>=24.0
-python-multipart>=0.0.20
-beautifulsoup4>=4.13
-cryptography>=43.0.0
+chromadb==1.5.9
+strands-agents==1.26.0
+anthropic==1.5.0
+mcp==1.30.0
+openai==3.3.1
+groq==1.6.0
+pypdf==6.16.2
+python-docx==1.2.0
+openpyxl==3.1.5
+aiofiles==25.1.0
+python-multipart==0.0.32
+beautifulsoup4==4.15.0
+cryptography==50.0.1
+playwright==1.62.0
 
 # dev
-pytest>=8.0
-pytest-asyncio>=0.24
+pytest==9.1.1
+pytest-asyncio==1.4.0

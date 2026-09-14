@@ -18,36 +18,38 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
+
+from agent.schemas import Lenient
 from strands import Agent
 from strands.multiagent import GraphBuilder
 
 from agent.agent import _build_model
 from core.config import settings
-from core.errors import humanise
+from core.errors import humanise, refresh_error
 from agent.tools import make_inventory_tool, make_search_tool
 from agent import usage
 
 
 # ── The artifact ──────────────────────────────────────────────────────────────
 
-class ReadingItem(BaseModel):
+class ReadingItem(Lenient):
     title: str = Field(description="Document or page name, exactly as it is named in the sources")
     source: str = Field(description="Which source it lives in, e.g. 'Confluence: ENG' or 'README.md'")
     why: str = Field(description="One line on why this person should read it")
 
 
-class PersonToMeet(BaseModel):
+class PersonToMeet(Lenient):
     name: str = Field(description="Person's name or handle as it appears in the sources")
     why: str = Field(description="What they own or know that is relevant to this joiner")
 
 
-class BriefSection(BaseModel):
+class BriefSection(Lenient):
     heading: str
     body: str = Field(description="2-4 sentences. Only facts supported by the findings.")
     sources: list[str] = Field(default_factory=list, description="Source labels supporting this section")
 
 
-class OnboardingBrief(BaseModel):
+class OnboardingBrief(Lenient):
     """A new joiner's orientation, assembled from the project's own sources."""
     headline: str = Field(description="One sentence: what this project is, in plain language")
     sections: list[BriefSection] = Field(description="3-5 sections: what it does, how it is built, how work flows, anything notable")
@@ -106,7 +108,9 @@ def _agent(system_prompt: str, tools: list | None = None) -> Agent:
         model=_build_model(background=True),
         tools=tools or [],
         system_prompt=system_prompt,
-        retry_strategy=ModelRetryStrategy(max_attempts=3, initial_delay=2, max_delay=8),
+        # Background work can afford to wait out a per-minute limit; a person
+        # in chat cannot, which is why the chat agent retries less patiently.
+        retry_strategy=ModelRetryStrategy(max_attempts=5, initial_delay=6, max_delay=45),
     )
 
 
@@ -238,12 +242,13 @@ async def generate_brief(db, chroma_client, workspace_id: str, user_id: str) -> 
     )
 
     try:
-        findings = await get_or_build_research(db, chroma_client, workspace_id)
+        from agent.agent import retry_on_quota
+        findings = await retry_on_quota(get_or_build_research, db, chroma_client, workspace_id)
         if not findings.strip():
             raise RuntimeError(
                 "Nothing is indexed for this project yet, so there is nothing to brief on."
             )
-        brief = await compose_brief(findings, person, workspace.get("name", "this project"))
+        brief = await retry_on_quota(compose_brief, findings, person, workspace.get("name", "this project"))
         await usage.record(db, workspace_id, "brief.compose", None, settings.GROQ_BACKGROUND_MODEL)
         await db.briefs.update_one(
             {"workspace_id": workspace_id, "user_id": user_id},
@@ -253,9 +258,15 @@ async def generate_brief(db, chroma_client, workspace_id: str, user_id: str) -> 
         )
         print(f"[brief] wrote onboarding brief for {person} in {workspace.get('name')}")
     except Exception as exc:
+        # A refresh that fails must not take a good brief off the page. Keep
+        # the last one readable and say the refresh did not happen.
+        current = await db.briefs.find_one({"workspace_id": workspace_id, "user_id": user_id})
+        has_brief = bool((current or {}).get("brief"))
         await db.briefs.update_one(
             {"workspace_id": workspace_id, "user_id": user_id},
-            {"$set": {"status": "error", "error_message": humanise(exc),
+            {"$set": {"status": "ready" if has_brief else "error",
+                      "error_message": None if has_brief else humanise(exc),
+                      "refresh_error": refresh_error(exc) if has_brief else None,
                       "updated_at": datetime.now(timezone.utc)}},
         )
         print(f"[brief] failed for {person}: {exc}")

@@ -1,4 +1,5 @@
 import { BookOpen, HelpCircle, Loader2, RefreshCw, Sparkles, Users } from 'lucide-react'
+import { AnswerText } from '@/components/AnswerText'
 import { AppShell } from '@/components/AppShell'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -117,6 +118,12 @@ export default function Brief() {
           </Button>
         </div>
 
+        {record.refresh_error && !record.stale_reason && (
+          <p className="rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">
+            The last refresh did not complete — {record.refresh_error} This is the last good brief.
+          </p>
+        )}
+
         {/* Acting on a stale reading list is worse than having none. */}
         {record.stale_reason && (
           <Card className="border-amber-500/40 bg-amber-500/[0.04]">
@@ -141,7 +148,7 @@ export default function Brief() {
               <CardTitle className="text-base">{s.heading}</CardTitle>
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
-              <p className="text-sm leading-relaxed text-muted-foreground">{s.body}</p>
+              <AnswerText text={s.body} className="text-sm leading-relaxed text-muted-foreground" />
               {s.sources.length > 0 && (
                 <div className="flex flex-wrap gap-1.5">
                   {s.sources.map((src) => (

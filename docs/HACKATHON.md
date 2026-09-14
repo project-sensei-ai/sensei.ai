@@ -42,18 +42,18 @@ Deploying on **Amazon Bedrock AgentCore** strengthens the Technical Implementati
 
 Every item below is required — missing any risks disqualification:
 
-- [ ] Text description (what it does, who it's for, how it works)
-- [ ] **PUBLIC** code repo (GitHub/GitLab/Bitbucket) with all source + setup instructions to run it
-- [ ] **MIT or Apache license file at repo root**, detectable in the GitHub About section
-- [ ] README
-- [ ] **Architecture diagram**
-- [ ] Demo video, **max 5 minutes**, public on YouTube/Vimeo, containing:
+- [x] Text description (what it does, who it's for, how it works) — `docs/SUBMISSION.md`
+- [x] **PUBLIC** code repo (GitHub/GitLab/Bitbucket) with all source + setup instructions to run it — github.com/project-sensei-ai/sensei.ai
+- [x] **MIT or Apache license file at repo root**, detectable in the GitHub About section
+- [x] README
+- [x] **Architecture diagram** — `docs/assets/architecture.png`
+- [ ] Demo video, **max 5 minutes**, public on YouTube/Vimeo — script in `docs/SUBMISSION.md`, containing:
   - Working-project demonstration
   - Pitch covering all three: **(1) problem, (2) who it's for, (3) why it matters**
   - Slides/screen recording/voiceover fine — camera not needed
-- [ ] AWS Builder ID
-- [ ] (Optional, recommended) Live demo URL — scores higher on Technical Implementation
-- [ ] All materials in **English**
+- [x] AWS Builder ID — exists on the team lead's account (the sign-in email)
+- [x] (Optional, recommended) Live demo URL — https://54-80-119-54.sslip.io (EC2 via `deploy/launch-ec2.sh`, in TESTING.md)
+- [x] All materials in **English**
 
 ### Bonus points (up to +0.6 total)
 

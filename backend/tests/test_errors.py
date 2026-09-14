@@ -13,7 +13,8 @@ def test_a_daily_token_cap_says_what_to_do():
         "`openai/gpt-oss-120b` in organization `org_01knm` service tier `on_demand` "
         "on tokens per day (TPD): Limit 200000, Used 196538'}}"
     )
-    assert "daily limit" in msg
+    # Says it will come back, without "limit" wording a reader cannot act on.
+    assert "later" in msg and "limit" not in msg.lower()
     assert "org_01knm" not in msg          # no internal identifiers
     assert len(msg) < 200
 
@@ -25,8 +26,10 @@ def test_bedrock_without_model_access():
 
 
 def test_output_limit():
-    assert "output limit" in humanise(
-        "Agent has reached an unrecoverable state due to max_tokens limit.")
+    """A member cannot raise a server setting, and "limit" wording is plumbing."""
+    msg = humanise("Agent has reached an unrecoverable state due to max_tokens limit.")
+    assert "MAX_OUTPUT_TOKENS" not in msg and "limit" not in msg.lower()
+    assert "shorter" in msg
 
 
 def test_messages_already_written_for_a_person_are_left_alone():
@@ -42,3 +45,9 @@ def test_an_unrecognised_failure_is_still_shown():
 
 def test_empty_falls_back():
     assert humanise("") == "Something went wrong."
+
+
+def test_a_malformed_report_is_a_sentence_not_a_pydantic_dump():
+    from core.errors import humanise
+    msg = humanise("4 validation errors for ReadinessGrades\ngrades.0.answer\n  Input should be a valid string [type=string_type]")
+    assert "expected shape" in msg and "pydantic" not in msg and "grades.0" not in msg

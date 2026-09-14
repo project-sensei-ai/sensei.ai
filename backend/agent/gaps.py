@@ -16,6 +16,8 @@ from typing import Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
+
+from agent.schemas import Lenient
 from strands import Agent, ModelRetryStrategy
 from strands.multiagent import GraphBuilder
 
@@ -23,14 +25,14 @@ from agent.agent import _build_model
 from agent.tools import make_inventory_tool, make_search_tool
 from agent import usage
 from core.config import settings
-from core.errors import humanise
+from core.errors import humanise, refresh_error
 
 RESCAN_DEBOUNCE = timedelta(minutes=10)
 
 
 # ── The artifact ──────────────────────────────────────────────────────────────
 
-class Gap(BaseModel):
+class Gap(Lenient):
     title: str = Field(description="The missing thing, named in a few words")
     kind: Literal["missing_document", "unowned_area", "dangling_reference", "thin_coverage"]
     detail: str = Field(description="What is missing and why it would matter to someone working here")
@@ -46,12 +48,12 @@ class Gap(BaseModel):
     )
 
 
-class GapReport(BaseModel):
+class GapReport(Lenient):
     summary: str = Field(description="One or two sentences on the overall state of this project's documentation")
     gaps: list[Gap] = Field(description="Up to 8, most consequential first")
 
 
-class DraftDocument(BaseModel):
+class DraftDocument(Lenient):
     title: str
     body_markdown: str = Field(description="The document itself, in markdown, ready to paste into a wiki")
     sources_used: list[str] = Field(default_factory=list)
@@ -138,7 +140,9 @@ def _agent(system_prompt: str, tools: list | None = None, background: bool = Tru
         model=_build_model(background=background),
         tools=tools or [],
         system_prompt=system_prompt,
-        retry_strategy=ModelRetryStrategy(max_attempts=3, initial_delay=2, max_delay=8),
+        # Background work can afford to wait out a per-minute limit; a person
+        # in chat cannot, which is why the chat agent retries less patiently.
+        retry_strategy=ModelRetryStrategy(max_attempts=5, initial_delay=6, max_delay=45),
     )
 
 
@@ -208,7 +212,13 @@ async def scan_gaps(db, chroma_client, workspace_id: str, force: bool = False) -
             if now - last < RESCAN_DEBOUNCE and existing.get("status") != "error":
                 return
         if existing.get("status") == "scanning":
-            return
+            # A run that died with the process leaves "scanning" behind; do not
+            # let a ghost block every future audit.
+            started = existing.get("updated_at")
+            if started is not None and started.tzinfo is None:
+                started = started.replace(tzinfo=timezone.utc)
+            if started is not None and now - started < timedelta(minutes=15):
+                return
 
     await db.gap_reports.update_one(
         {"workspace_id": workspace_id},
@@ -218,7 +228,8 @@ async def scan_gaps(db, chroma_client, workspace_id: str, force: bool = False) -
     )
 
     try:
-        report = await audit_project(workspace_id, chroma_client, db)
+        from agent.agent import retry_on_quota
+        report = await retry_on_quota(audit_project, workspace_id, chroma_client, db)
         gaps = []
         for g in report.gaps:
             d = g.model_dump()
@@ -231,9 +242,13 @@ async def scan_gaps(db, chroma_client, workspace_id: str, force: bool = False) -
         )
         print(f"[gaps] {len(gaps)} gap(s) found in workspace {workspace_id}")
     except Exception as exc:
+        current = await db.gap_reports.find_one({"workspace_id": workspace_id})
+        has_report = bool((current or {}).get("gaps"))
         await db.gap_reports.update_one(
             {"workspace_id": workspace_id},
-            {"$set": {"status": "error", "error_message": humanise(exc),
+            {"$set": {"status": "ready" if has_report else "error",
+                      "error_message": None if has_report else humanise(exc),
+                      "refresh_error": refresh_error(exc) if has_report else None,
                       "updated_at": datetime.now(timezone.utc)}},
         )
         print(f"[gaps] audit failed for {workspace_id}: {exc}")

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import {
   AlertTriangle, FileWarning, Loader2, PenLine, RefreshCw, ShieldQuestion, Sparkles, X,
 } from 'lucide-react'
+import { AnswerText } from '@/components/AnswerText'
 import { AppShell } from '@/components/AppShell'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -228,6 +229,11 @@ export default function Gaps() {
           </Card>
         ) : (
           <>
+            {report.refresh_error && (
+              <p className="rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">
+                The last audit did not complete — {report.refresh_error} This is the last good report.
+              </p>
+            )}
             {report.summary && (
               <Card className="border-dashed">
                 <CardHeader className="pb-3">
@@ -240,7 +246,7 @@ export default function Gaps() {
                       </span>
                     )}
                   </CardTitle>
-                  <CardDescription>{report.summary}</CardDescription>
+                  <AnswerText text={report.summary} className="text-sm text-muted-foreground" />
                 </CardHeader>
               </Card>
             )}

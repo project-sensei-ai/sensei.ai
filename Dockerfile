@@ -26,6 +26,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Chromium for the Google Meet bot. ~400 MB; skip with --build-arg WITH_BROWSER=0
+# if the image is only ever used for chat.
+ARG WITH_BROWSER=1
+RUN if [ "$WITH_BROWSER" = "1" ]; then playwright install --with-deps chromium; fi
+
 COPY backend/ .
 
 # Served by FastAPI at / with an SPA fallback, so judges get one URL.

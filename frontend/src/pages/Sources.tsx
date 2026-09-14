@@ -53,6 +53,7 @@ const TYPE_ICON: Record<string, React.ReactNode> = {
   confluence: <Globe className="h-4 w-4 text-muted-foreground" />,
   jira:       <CircleDot className="h-4 w-4 text-muted-foreground" />,
   slack:      <MessageSquare className="h-4 w-4 text-muted-foreground" />,
+  meeting:    <Globe className="h-4 w-4 text-muted-foreground" />,
 }
 
 // ── Source card ────────────────────────────────────────────────────────────────
@@ -262,7 +263,7 @@ function labelForSpace(v: string): string {
 
 interface GithubRepo { full_name: string; description: string | null; private: boolean }
 
-function AddSourcePanel({ onClose }: { onClose: () => void }) {
+export function AddSourcePanel({ onClose, embedded = false }: { onClose: () => void; embedded?: boolean }) {
   const [tab, setTab] = useState<Tab>('file')
   const [addSource] = useAddSourceMutation()
   const [uploadFile] = useUploadFileMutation()
@@ -468,13 +469,15 @@ function AddSourcePanel({ onClose }: { onClose: () => void }) {
   ]
 
   return (
-    <div className="rounded-xl border bg-card shadow-lg p-5 flex flex-col gap-4">
-      <div className="flex items-center justify-between">
-        <h3 className="font-semibold text-sm">Add a new source</h3>
-        <Button size="icon" variant="ghost" className="h-7 w-7" onClick={onClose}>
-          <X className="h-4 w-4" />
-        </Button>
-      </div>
+    <div className={embedded ? "flex flex-col gap-4" : "rounded-xl border bg-card shadow-lg p-5 flex flex-col gap-4"}>
+      {!embedded && (
+        <div className="flex items-center justify-between">
+          <h3 className="font-semibold text-sm">Add a new source</h3>
+          <Button size="icon" variant="ghost" className="h-7 w-7" onClick={onClose}>
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex gap-1 border-b">

@@ -1,15 +1,19 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { Bot, ChevronDown, ChevronUp, MessageSquarePlus, Send, Trash2, User } from 'lucide-react'
+import { Check, ChevronDown, ChevronRight, ChevronUp, Download, FileSpreadsheet, FileText, Loader2, MessageSquarePlus, Send, Trash2, User } from 'lucide-react'
+import { AnswerText } from '@/components/AnswerText'
 import { AppShell } from '@/components/AppShell'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/Spinner'
+import { SenseiAvatar } from '@/components/SenseiAvatar'
 import {
   useListChatSessionsQuery,
   useCreateChatSessionMutation,
   useGetChatSessionQuery,
   useArchiveChatSessionMutation,
+  type Artifact,
   type ChatCitation,
   type ChatMessage,
+  type ChatStep,
 } from '@/services/onboardingApi'
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -42,7 +46,6 @@ function CitationList({ citations }: { citations: ChatCitation[] }) {
         <ul className="mt-2 flex flex-col gap-2">
           {citations.map((c) => (
             <li key={c.index} className="rounded-md bg-muted/60 px-3 py-2 text-xs">
-              <span className="font-semibold text-primary mr-1.5">[{c.index}]</span>
               <span className="font-medium">{c.source_label}</span>
               <span className="ml-2 text-muted-foreground">({Math.round(c.score * 100)}% match)</span>
               <p className="mt-1 text-muted-foreground leading-relaxed">{c.excerpt}</p>
@@ -54,16 +57,78 @@ function CitationList({ citations }: { citations: ChatCitation[] }) {
   )
 }
 
-function MessageBubble({ msg }: { msg: ChatMessage & { error?: boolean } }) {
+function seconds(ms: number): string {
+  const s = ms / 1000
+  return s < 10 ? `${Math.max(0.1, Math.round(s * 10) / 10)}s` : `${Math.round(s)}s`
+}
+
+/** What the agent did while it was answering, folded away once the answer is in. */
+function ThoughtDisclosure({ steps, durationMs }: { steps: ChatStep[]; durationMs?: number | null }) {
+  const [open, setOpen] = useState(false)
+  if (steps.length === 0) return null
+  const total = durationMs ?? steps[steps.length - 1]?.ms ?? null
+  const summary = [
+    total != null && total > 0 ? `Thought for ${seconds(total)}` : 'Thought',
+    `${steps.length} step${steps.length !== 1 ? 's' : ''}`,
+  ].join(' · ')
+  return (
+    <div className="mb-2">
+      <button
+        className="flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+      >
+        {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+        {summary}
+      </button>
+      {open && (
+        <ol className="mt-1.5 flex flex-col gap-1 border-l pl-3">
+          {steps.map((s, i) => (
+            <li key={i} className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Check className="h-3 w-3 shrink-0 text-primary/70" />
+              <span className="flex-1">{s.label}</span>
+              <span className="tabular-nums text-muted-foreground/60">{seconds(s.ms)}</span>
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
+  )
+}
+
+/** The steps as they happen: earlier ones ticked, the current one moving. */
+function LiveSteps({ steps, writing }: { steps: string[]; writing: boolean }) {
+  if (steps.length === 0) return null
+  return (
+    <ol className="ml-11 flex flex-col gap-1" aria-live="polite">
+      {steps.map((label, i) => {
+        const current = i === steps.length - 1
+        return (
+          <li
+            key={i}
+            className={`flex items-center gap-2 text-xs ${current ? 'text-foreground' : 'text-muted-foreground'}`}
+          >
+            {current
+              ? <Loader2 className={`h-3 w-3 shrink-0 text-primary ${writing ? '' : 'animate-spin'}`} />
+              : <Check className="h-3 w-3 shrink-0 text-primary/70" />}
+            <span className={current && !writing ? 'animate-pulse' : ''}>{label}</span>
+          </li>
+        )
+      })}
+    </ol>
+  )
+}
+
+function MessageBubble({ msg, live = false }: { msg: ChatMessage & { error?: boolean }; live?: boolean }) {
   const isUser = msg.role === 'user'
   return (
     <div className={`flex gap-3 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
       <div
         className={`shrink-0 flex h-8 w-8 items-center justify-center rounded-full text-sm ${
-          isUser ? 'bg-primary text-primary-foreground' : 'bg-muted'
+          isUser ? 'bg-primary text-primary-foreground' : ''
         }`}
       >
-        {isUser ? <User className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
+        {isUser ? <User className="h-4 w-4" /> : <SenseiAvatar size="sm" />}
       </div>
       <div
         className={`max-w-[80%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
@@ -74,7 +139,15 @@ function MessageBubble({ msg }: { msg: ChatMessage & { error?: boolean } }) {
             : 'bg-muted rounded-tl-sm'
         }`}
       >
-        <p className="whitespace-pre-wrap">{msg.content}</p>
+        {!isUser && !live && msg.steps && msg.steps.length > 0 && (
+          <ThoughtDisclosure steps={msg.steps} durationMs={msg.duration_ms} />
+        )}
+        {isUser || (msg as any).error
+          ? <p className="whitespace-pre-wrap">{msg.content}</p>
+          : <AnswerText text={msg.content} live={live} />}
+        {!isUser && msg.artifacts && msg.artifacts.length > 0 && (
+          <ArtifactList artifacts={msg.artifacts} />
+        )}
         {!isUser && msg.citations && msg.citations.length > 0 && (
           <CitationList citations={msg.citations} />
         )}
@@ -83,11 +156,61 @@ function MessageBubble({ msg }: { msg: ChatMessage & { error?: boolean } }) {
   )
 }
 
+function ArtifactList({ artifacts }: { artifacts: Artifact[] }) {
+  if (artifacts.length === 0) return null
+  return (
+    <div className="mt-3 flex flex-col gap-2">
+      {artifacts.map((a) => (
+        <a
+          key={a.id}
+          href={a.url}
+          className="flex items-center gap-3 rounded-lg border bg-background/60 px-3 py-2 text-xs transition-colors hover:bg-background"
+        >
+          {a.kind === 'spreadsheet'
+            ? <FileSpreadsheet className="h-5 w-5 shrink-0 text-green-600" />
+            : <FileText className="h-5 w-5 shrink-0 text-blue-600" />}
+          <span className="min-w-0 flex-1">
+            <span className="block truncate font-medium">{a.filename}</span>
+            <span className="block text-muted-foreground">{a.summary} · {Math.max(1, Math.round(a.size / 1024))} KB</span>
+          </span>
+          <Download className="h-4 w-4 shrink-0 text-muted-foreground" />
+        </a>
+      ))}
+    </div>
+  )
+}
+
+// What a colleague gets asked on day one. Each is a real capability, and the
+// chip is the fastest way for a reviewer to find out.
+const STARTERS = [
+  "Who's on call next week, and who's the release captain?",
+  'What has Daniel worked on recently?',
+  'Put the open issues and PRs in a spreadsheet',
+  'What did we decide about Friday deploys?',
+  'Is there a runbook for rollbacks?',
+]
+
+function Starters({ onPick }: { onPick: (q: string) => void }) {
+  return (
+    <div className="flex flex-wrap justify-center gap-2">
+      {STARTERS.map((q) => (
+        <button
+          key={q}
+          onClick={() => onPick(q)}
+          className="rounded-full border bg-background px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground"
+        >
+          {q}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 function TypingIndicator() {
   return (
     <div className="flex gap-3">
-      <div className="shrink-0 flex h-8 w-8 items-center justify-center rounded-full bg-muted">
-        <Bot className="h-4 w-4" />
+      <div className="shrink-0 flex h-8 w-8 items-center justify-center rounded-full">
+        <SenseiAvatar size="sm" pulse />
       </div>
       <div className="flex items-center gap-1.5 rounded-2xl rounded-tl-sm bg-muted px-4 py-3">
         <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground animate-bounce [animation-delay:-0.3s]" />
@@ -108,8 +231,11 @@ export default function Chat() {
   // only while a stream is open; once it closes the message is persisted and
   // comes back through the session query like any other.
   const [streamingText, setStreamingText] = useState('')
-  const [toolTrail, setToolTrail] = useState<string[]>([])
+  const [liveSteps, setLiveSteps] = useState<string[]>([])
   const [streaming, setStreaming] = useState(false)
+  // How many stored messages there were when the optimistic ones were added.
+  // Until the stored list grows past it, the optimistic ones are shown after it.
+  const [optimisticBase, setOptimisticBase] = useState(0)
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
@@ -124,18 +250,16 @@ export default function Chat() {
   const sessions = sessionsData?.sessions ?? []
   const storedMessages: (ChatMessage & { error?: boolean })[] = sessionData?.session.messages ?? []
 
-  // Merge stored messages with any optimistic ones not yet persisted, so the
-  // current turn's bubbles show immediately in an existing session instead of
-  // waiting for the refetch. The filter drops optimistic copies once the
-  // refetch brings them back from the DB.
-  const pending = optimisticMessages.filter(
-    (o) => !storedMessages.some(
-      (s) => s.role === o.role
-        && s.content === o.content
-        && (o.citations?.length ?? 0) === (s.citations?.length ?? 0),
-    ),
-  )
-  const messages: (ChatMessage & { error?: boolean })[] = [...storedMessages, ...pending]
+  // Stored messages, then any optimistic ones not yet persisted. Showing one or
+  // the other made an existing conversation hide the question while it streamed,
+  // and blank out the finished answer until the refetch came back.
+  const persisted = storedMessages.length > optimisticBase
+  const messages = persisted ? storedMessages : [...storedMessages, ...optimisticMessages]
+
+  useEffect(() => {
+    // The exchange is stored now; the optimistic copies have done their job.
+    if (persisted && optimisticMessages.length > 0) setOptimisticMessages([])
+  }, [persisted, optimisticMessages.length])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -188,11 +312,12 @@ export default function Chat() {
       content: question,
       created_at: new Date().toISOString(),
     }
-    setOptimisticMessages((prev) => [...prev, userMsg])
+    if (optimisticMessages.length === 0 || persisted) setOptimisticBase(storedMessages.length)
+    setOptimisticMessages((prev) => (persisted ? [userMsg] : [...prev, userMsg]))
 
     setStreaming(true)
     setStreamingText('')
-    setToolTrail([])
+    setLiveSteps(['Reading your question'])
 
     try {
       const res = await fetch(`/api/chat/sessions/${sessionId}/stream`, {
@@ -208,7 +333,14 @@ export default function Chat() {
       let buffer = ''
       let answer = ''
       let citations: ChatCitation[] = []
+      let artifacts: Artifact[] = []
+      let steps: ChatStep[] = []
+      let durationMs: number | null = null
       let failed: string | null = null
+      const addStep = (label?: string) => {
+        if (!label) return
+        setLiveSteps((prev) => (prev[prev.length - 1] === label ? prev : [...prev, label]))
+      }
 
       // Server-sent events arrive as `data: {...}\n\n`, and a chunk can split
       // an event in half — so hold the remainder until the next read.
@@ -222,13 +354,25 @@ export default function Chat() {
           const line = part.split('\n').find((l) => l.startsWith('data: '))
           if (!line) continue
           const event = JSON.parse(line.slice(6))
-          if (event.type === 'tool') {
-            setToolTrail((prev) => [...prev, event.label])
+          if (event.type === 'step' || event.type === 'tool') {
+            addStep(event.label)
+          } else if (event.type === 'reset') {
+            // What was shown was narration, not the answer: take it back.
+            answer = ''
+            setStreamingText('')
           } else if (event.type === 'text') {
+            if (!answer) addStep('Writing the answer')
             answer += event.delta
             setStreamingText(answer)
           } else if (event.type === 'done') {
+            if (typeof event.answer === 'string') answer = event.answer
             citations = event.citations ?? []
+            artifacts = event.artifacts ?? []
+            steps = event.steps ?? []
+            durationMs = event.duration_ms ?? null
+          } else if (event.type === 'notice') {
+            // Older servers sent plumbing here; show only that the turn is slower.
+            addStep('Taking a little longer to check')
           } else if (event.type === 'error') {
             failed = event.message
           }
@@ -239,6 +383,9 @@ export default function Chat() {
         role: 'assistant',
         content: failed ?? answer,
         citations,
+        artifacts,
+        steps: failed ? [] : steps,
+        duration_ms: durationMs,
         error: !!failed,
         created_at: new Date().toISOString(),
       }])
@@ -253,7 +400,7 @@ export default function Chat() {
     } finally {
       setStreaming(false)
       setStreamingText('')
-      setToolTrail([])
+      setLiveSteps([])
     }
 
     inputRef.current?.focus()
@@ -322,13 +469,14 @@ export default function Chat() {
         <div className="flex-1 flex flex-col min-w-0 px-6">
           {!activeSessionId ? (
             <div className="flex-1 flex flex-col items-center justify-center gap-4 text-center">
-              <Bot className="h-12 w-12 text-muted-foreground/40" />
+              <SenseiAvatar size="lg" />
               <div>
-                <p className="font-medium">Start a conversation</p>
+                <p className="font-medium">Ask Sensei like a colleague</p>
                 <p className="text-sm text-muted-foreground mt-1">
-                  Ask anything about your indexed sources, or just say hi.
+                  About the project, a person's work, a ticket's status — or hand it work.
                 </p>
               </div>
+              <Starters onPick={(q) => { setInput(q); handleNewChat() }} />
               <Button onClick={handleNewChat} disabled={creating} className="gap-2">
                 {creating ? <Spinner className="h-4 w-4" /> : <MessageSquarePlus className="h-4 w-4" />}
                 New chat
@@ -339,8 +487,10 @@ export default function Chat() {
               {/* Message list */}
               <div className="flex-1 overflow-y-auto flex flex-col gap-4 py-4">
                 {messages.length === 0 && !streaming && (
-                  <div className="flex items-center justify-center h-full">
-                    <p className="text-sm text-muted-foreground">Send a message to get started.</p>
+                  <div className="flex h-full flex-col items-center justify-center gap-4">
+                    <SenseiAvatar size="lg" />
+                    <p className="text-sm text-muted-foreground">What would you ask a colleague who has read everything?</p>
+                    <Starters onPick={(q) => { setInput(q); inputRef.current?.focus() }} />
                   </div>
                 )}
                 {messages.map((msg, i) => (
@@ -350,24 +500,10 @@ export default function Chat() {
                 {/* The agent working, rather than a spinner hiding it. */}
                 {streaming && (
                   <div className="flex flex-col gap-2">
-                    {toolTrail.length > 0 && (
-                      <div className="flex flex-col gap-1">
-                        {toolTrail.map((label, i) => (
-                          <p
-                            key={i}
-                            className="flex items-center gap-2 text-xs text-muted-foreground"
-                          >
-                            <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary/60" />
-                            {label}
-                            {i === toolTrail.length - 1 && !streamingText && (
-                              <span className="animate-pulse">…</span>
-                            )}
-                          </p>
-                        ))}
-                      </div>
-                    )}
+                    <LiveSteps steps={liveSteps} writing={!!streamingText} />
                     {streamingText ? (
                       <MessageBubble
+                        live
                         msg={{
                           role: 'assistant',
                           content: streamingText,
@@ -375,7 +511,7 @@ export default function Chat() {
                         }}
                       />
                     ) : (
-                      toolTrail.length === 0 && <TypingIndicator />
+                      liveSteps.length === 0 && <TypingIndicator />
                     )}
                   </div>
                 )}

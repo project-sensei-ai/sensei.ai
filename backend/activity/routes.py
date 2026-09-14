@@ -51,6 +51,15 @@ async def feed(limit: int = 30, user=Depends(get_current_user), db=Depends(get_d
         add(report.get("updated_at"), "audit", f"Audited the documentation — {len(gaps)} gap(s)",
             f"{draftable} it offered to write itself", True)
 
+    # The self-interview — run after the sources settled, nobody asked.
+    rd = await db.readiness.find_one({"workspace_id": ws})
+    if rd and rd.get("status") == "ready":
+        missing = rd.get("total", 0) - rd.get("score", 0)
+        add(rd.get("updated_at"), "readiness",
+            f"Interviewed itself — ready for {rd.get('score', 0)} of {rd.get('total', 0)} first-week questions",
+            f"{missing} it could not answer went to the ledger for a person to close" if missing else "It could answer all of them from the sources",
+            True)
+
     # Drafts — these ones a human asked for.
     async for d in db.drafts.find({"workspace_id": ws}).sort("updated_at", -1).limit(limit):
         if d.get("status") == "ready":

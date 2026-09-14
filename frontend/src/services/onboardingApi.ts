@@ -19,7 +19,7 @@ export interface SourceStats {
   pages_crawled?: number
 }
 
-export type SourceType = 'github' | 'file' | 'url' | 'confluence' | 'jira' | 'slack'
+export type SourceType = 'github' | 'file' | 'url' | 'confluence' | 'jira' | 'slack' | 'meeting'
 export type SourceStatus = 'pending' | 'indexing' | 'ready' | 'error'
 
 export interface Source {
@@ -94,6 +94,8 @@ export interface Brief {
   /** Set when the project moved after this brief was written. */
   stale_reason?: string | null
   stale_at?: string | null
+  /** The last refresh failed; the brief shown is the last good one. */
+  refresh_error?: string | null
   created_at: string | null
   updated_at: string | null
 }
@@ -118,6 +120,7 @@ export interface GapReport {
   summary: string | null
   gaps: Gap[]
   error_message: string | null
+  refresh_error?: string | null
   updated_at: string | null
 }
 
@@ -157,6 +160,7 @@ export interface Grant {
 export interface TrustOverview {
   workspace: { name: string; role: WorkspaceRole }
   grants: Grant[]
+  tools: ToolGrant[]
   people: {
     name: string | null
     email: string | null
@@ -167,6 +171,8 @@ export interface TrustOverview {
   }[]
   coverage: {
     sources: number
+    tools: number
+    write_enabled: number
     indexed_chunks: number
     people_with_access: number
     pending_invites: number
@@ -199,7 +205,7 @@ export interface LedgerStats {
 
 export interface ActivityEvent {
   at: string | null
-  kind: 'brief' | 'audit' | 'draft' | 'source'
+  kind: 'brief' | 'audit' | 'draft' | 'source' | 'readiness'
   title: string
   detail: string
   /** True when the agent started this itself, rather than a person asking. */
@@ -214,6 +220,116 @@ export interface AddMemberResult {
   invite_url?: string
 }
 
+export interface ToolSpec {
+  name: string
+  server_name: string
+  description: string
+  access: 'read' | 'write'
+}
+
+export type GrantKind = 'mcp_http' | 'mcp_sse' | 'mcp_stdio' | 'mcp_oauth'
+
+export interface ToolGrant {
+  id: string
+  workspace_id: string
+  name: string
+  kind: GrantKind
+  url: string | null
+  command: string | null
+  args: string[]
+  allow_write: boolean
+  disabled_tools: string[]
+  tools: ToolSpec[]
+  read_count: number
+  write_count: number
+  status: 'connected' | 'error' | 'disabled' | 'authorizing'
+  error_message: string | null
+  auth?: 'oauth' | 'token'
+  needs_reauth?: boolean
+  created_at: string | null
+  last_used_at: string | null
+  uses: number
+  credential_state?: 'encrypted' | 'plaintext' | 'none'
+  has_credential?: boolean
+}
+
+export interface ConnectToolInput {
+  name: string
+  kind: GrantKind
+  url?: string
+  authorization?: string
+  headers?: Record<string, string>
+  command?: string
+  args?: string[]
+  env?: Record<string, string>
+  allow_write?: boolean
+}
+
+export interface Artifact {
+  id: string
+  title: string
+  filename: string
+  kind: 'spreadsheet' | 'document' | string
+  mime: string
+  size: number
+  summary: string | null
+  created_at: string | null
+  url: string
+}
+
+export interface MeetingUtterance {
+  speaker: string
+  text: string
+  at: string
+}
+
+export interface MeetingReply {
+  id: string
+  at: string
+  kind: 'answer' | 'correction' | 'silent'
+  trigger: string
+  text: string
+  citations: ChatCitation[]
+  confidence: number
+  reason: string
+}
+
+export interface Meeting {
+  id: string
+  workspace_id: string
+  title: string
+  status: 'live' | 'ended'
+  mode: 'companion' | 'meet_bot'
+  meet_url?: string | null
+  bot_status?: string | null
+  started_at: string | null
+  ended_at: string | null
+  utterance_count: number
+  reply_count: number
+  transcript?: MeetingUtterance[]
+  replies?: MeetingReply[]
+  summary?: string | null
+  source_id?: string | null
+}
+
+export interface ReadinessItem {
+  question: string
+  why: string
+  answerable: boolean
+  answer: string
+  source: string
+}
+
+export interface Readiness {
+  status: 'running' | 'ready' | 'error'
+  score: number
+  total: number
+  items: ReadinessItem[]
+  error_message: string | null
+  refresh_error?: string | null
+  updated_at: string | null
+}
+
 export interface ChatCitation {
   index: number
   source_label: string
@@ -226,10 +342,21 @@ export interface ChatResponse {
   citations: ChatCitation[]
 }
 
+/** One thing the agent did while answering, and when (ms from the question). */
+export interface ChatStep {
+  label: string
+  ms: number
+}
+
 export interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
   citations?: ChatCitation[]
+  artifacts?: Artifact[]
+  tools_used?: string[]
+  /** Absent on messages stored before the thinking stream existed. */
+  steps?: ChatStep[]
+  duration_ms?: number | null
   created_at: string
 }
 
@@ -432,6 +559,82 @@ const onboardingApi = api.injectEndpoints({
       invalidatesTags: ['Source'],
     }),
 
+    // ── Tool grants ────────────────────────────────────────────────────────────
+
+    getTools: builder.query<{ grants: ToolGrant[]; can_manage: boolean }, void>({
+      query: () => '/tools',
+      providesTags: ['Tool'],
+    }),
+
+    connectTool: builder.mutation<{ grant: ToolGrant }, ConnectToolInput>({
+      query: (body) => ({ url: '/tools', method: 'POST', body }),
+      invalidatesTags: ['Tool', 'Trust'],
+    }),
+
+    updateTool: builder.mutation<
+      { grant: ToolGrant },
+      { id: string; allow_write?: boolean; disabled_tools?: string[]; name?: string }
+    >({
+      query: ({ id, ...body }) => ({ url: `/tools/${id}`, method: 'PATCH', body }),
+      invalidatesTags: ['Tool', 'Trust'],
+    }),
+
+    testTool: builder.mutation<{ grant: ToolGrant }, string>({
+      query: (id) => ({ url: `/tools/${id}/test`, method: 'POST' }),
+      invalidatesTags: ['Tool', 'Trust'],
+    }),
+
+    revokeTool: builder.mutation<void, string>({
+      query: (id) => ({ url: `/tools/${id}`, method: 'DELETE' }),
+      invalidatesTags: ['Tool', 'Trust'],
+    }),
+
+    getOAuthPresets: builder.query<{ presets: { id: string; name: string; url: string; blurb: string }[] }, void>({
+      query: () => '/tools/oauth/presets',
+    }),
+
+    startOAuth: builder.mutation<{ grant_id: string; auth_url: string }, { name: string; url: string; allow_write?: boolean }>({
+      query: (body) => ({ url: '/tools/oauth/start', method: 'POST', body }),
+      invalidatesTags: ['Tool'],
+    }),
+
+    getReadiness: builder.query<{ readiness: Readiness | null }, void>({
+      query: () => '/readiness',
+      providesTags: ['Readiness'],
+    }),
+
+    rerunReadiness: builder.mutation<{ message: string }, void>({
+      query: () => ({ url: '/readiness/run', method: 'POST' }),
+      invalidatesTags: ['Readiness', 'Activity', 'Answer'],
+    }),
+
+    getArtifacts: builder.query<{ artifacts: Artifact[] }, void>({
+      query: () => '/artifacts',
+      providesTags: ['Artifact'],
+    }),
+
+    // ── Meetings ───────────────────────────────────────────────────────────────
+
+    listMeetings: builder.query<{ meetings: Meeting[] }, void>({
+      query: () => '/meetings',
+      providesTags: ['Meeting'],
+    }),
+
+    getMeeting: builder.query<{ meeting: Meeting }, string>({
+      query: (id) => `/meetings/${id}`,
+      providesTags: (_r, _e, id) => [{ type: 'Meeting', id }],
+    }),
+
+    startMeeting: builder.mutation<{ meeting: Meeting }, { title: string; mode?: 'companion' | 'meet_bot'; meet_url?: string }>({
+      query: (body) => ({ url: '/meetings', method: 'POST', body }),
+      invalidatesTags: ['Meeting'],
+    }),
+
+    endMeeting: builder.mutation<{ meeting: Meeting }, string>({
+      query: (id) => ({ url: `/meetings/${id}/end`, method: 'POST' }),
+      invalidatesTags: (_r, _e, id) => ['Meeting', { type: 'Meeting', id }, 'Source', 'Activity'],
+    }),
+
     // ── Chat sessions ──────────────────────────────────────────────────────────
 
     listChatSessions: builder.query<{ sessions: ChatSession[] }, void>({
@@ -503,4 +706,18 @@ export const {
   useGetChatSessionQuery,
   useArchiveChatSessionMutation,
   useSendMessageMutation,
+  useGetToolsQuery,
+  useConnectToolMutation,
+  useUpdateToolMutation,
+  useTestToolMutation,
+  useRevokeToolMutation,
+  useGetOAuthPresetsQuery,
+  useStartOAuthMutation,
+  useGetArtifactsQuery,
+  useGetReadinessQuery,
+  useRerunReadinessMutation,
+  useListMeetingsQuery,
+  useGetMeetingQuery,
+  useStartMeetingMutation,
+  useEndMeetingMutation,
 } = onboardingApi

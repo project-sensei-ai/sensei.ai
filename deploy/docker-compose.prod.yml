@@ -1,0 +1,46 @@
+# Production shape: the app container plus Caddy terminating HTTPS.
+#
+#   docker compose -f deploy/docker-compose.prod.yml up -d --build
+#
+# Caddy fetches a Let's Encrypt certificate for $SENSEI_HOST automatically, so a
+# bare EC2 box gets a real https:// URL with no console work. Use a sslip.io
+# name (e.g. 3-91-12-7.sslip.io) if you have no DNS.
+services:
+  app:
+    build:
+      context: ..
+      args:
+        VITE_GOOGLE_CLIENT_ID: "${VITE_GOOGLE_CLIENT_ID:-}"
+    env_file:
+      - ../backend/.env
+    environment:
+      - CHROMA_PERSIST_DIR=/app/chroma_data
+      - STATIC_DIR=/app/static
+      - FRONTEND_ORIGIN=https://${SENSEI_HOST}
+      - ALLOWED_ORIGINS=["https://${SENSEI_HOST}"]
+      - DEBUG=false
+    volumes:
+      - chroma_data:/app/chroma_data
+    restart: unless-stopped
+    expose:
+      - "8000"
+
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - SENSEI_HOST=${SENSEI_HOST}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+    restart: unless-stopped
+
+volumes:
+  chroma_data:
+  caddy_data:
+  caddy_config:

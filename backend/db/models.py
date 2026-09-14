@@ -1,7 +1,19 @@
 def _iso(val) -> str | None:
+    """
+    ISO-8601 with an explicit zone. Mongo hands datetimes back naive, in UTC;
+    serialised bare, a browser reads them as local time and "just now" becomes
+    "5 hours ago" in Hyderabad.
+    """
     if val is None:
         return None
-    return val.isoformat() if hasattr(val, "isoformat") else val
+    if not hasattr(val, "isoformat"):
+        return val
+    if getattr(val, "tzinfo", None) is None:
+        return val.isoformat() + "Z"
+    return val.isoformat()
+
+
+from core.errors import reworded, stored_refresh_error
 
 
 def serialize_user(doc: dict) -> dict:
@@ -102,10 +114,12 @@ def serialize_brief(doc: dict) -> dict:
         "person_email": doc.get("person_email"),
         "status": doc.get("status", "generating"),
         "brief": doc.get("brief"),
-        "error_message": doc.get("error_message"),
+        "error_message": reworded(doc.get("error_message")),
         # Set when the watcher sees the project move under a brief written
         # against how it used to be.
         "stale_reason": doc.get("stale_reason"),
+        # The last refresh failed but the brief shown is still the last good one.
+        "refresh_error": stored_refresh_error(doc.get("refresh_error")),
         "stale_at": _iso(doc.get("stale_at")),
         "created_at": _iso(doc.get("created_at")),
         "updated_at": _iso(doc.get("updated_at")),
@@ -119,7 +133,8 @@ def serialize_gap_report(doc: dict) -> dict:
         "status": doc.get("status", "scanning"),
         "summary": doc.get("summary"),
         "gaps": doc.get("gaps", []),
-        "error_message": doc.get("error_message"),
+        "error_message": reworded(doc.get("error_message")),
+        "refresh_error": stored_refresh_error(doc.get("refresh_error")),
         "created_at": _iso(doc.get("created_at")),
         "updated_at": _iso(doc.get("updated_at")),
     }
@@ -132,7 +147,7 @@ def serialize_draft(doc: dict) -> dict:
         "gap_title": doc.get("gap_title"),
         "status": doc.get("status", "drafting"),
         "draft": doc.get("draft"),
-        "error_message": doc.get("error_message"),
+        "error_message": reworded(doc.get("error_message")),
         "updated_at": _iso(doc.get("updated_at")),
     }
 

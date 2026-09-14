@@ -136,13 +136,12 @@ class _FakeClient:
             return _FakeResponse([
                 {"id": "customfield_10019", "name": "Team", "custom": True},
             ])
-        assert url.endswith("/rest/api/3/search"), url
-        start = params.get("startAt", 0)
-        batch = self._issues[:1] if start == 0 else self._issues[1:]
-        return _FakeResponse({
-            "total": 2,
-            "issues": batch,
-        })
+        assert url.endswith("/rest/api/3/search/jql"), url
+        token = params.get("nextPageToken")
+        if token is None:
+            return _FakeResponse({"issues": self._issues[:1], "isLast": False, "nextPageToken": "page-2"})
+        assert token == "page-2"
+        return _FakeResponse({"issues": self._issues[1:], "isLast": True})
 
     async def __aenter__(self):
         return self
@@ -218,7 +217,7 @@ class _SearchGoneClient:
     async def get(self, url, params=None):
         if url.endswith("/rest/api/3/field"):
             return _FakeResponse([{"id": "customfield_10019", "name": "Team", "custom": True}])
-        if url.endswith("/rest/api/3/search"):
+        if url.endswith("/rest/api/3/search/jql"):
             gone = _FakeResponse({}, status=410)
             gone.raise_for_status = _raise_gone
             return gone
@@ -243,3 +242,48 @@ async def test_fetch_jira_falls_back_to_board_when_search_is_gone(monkeypatch):
         email="a@b.com", api_token="x", project_key="eng",
     )
     assert [d["metadata"]["title"] for d in docs] == ["ENG-1: Fix login", "ENG-2: Add logout"]
+
+
+class _BoardStringsClient(_SearchGoneClient):
+    """The agile board API returns descriptions and comments as plain text, not ADF."""
+    def __init__(self, *a, **k):
+        super().__init__(*a, **k)
+        self._issues = [{"key": "ENG-9", "fields": {
+            "summary": "Geofence for the Leeds depot", "status": {"name": "To Do"}, "priority": {"name": "Medium"},
+            "assignee": None, "labels": ["leeds"],
+            "description": "Geofence: 350 metre radius around LS10 1AB. Owner: Priya Nair.",
+            "comment": {"comments": [{"author": {"displayName": "Ravi Menon"}, "body": "Needed before the cut-over."}]},
+        }}]
+
+
+async def test_board_api_descriptions_and_comments_are_kept(monkeypatch):
+    monkeypatch.setattr(tools.httpx, "AsyncClient", _BoardStringsClient)
+    docs = await tools.fetch_jira(base_url="https://charanb.atlassian.net", email="a@b.com", api_token="x", project_key="eng")
+    assert "Owner: Priya Nair" in docs[0]["content"] and "350 metre" in docs[0]["content"]
+    assert docs[1]["content"] == "Ravi Menon: Needed before the cut-over."
+
+
+# ── A pasted address is cut back to the site ─────────────────────────────────
+
+import pytest as _pytest
+from pydantic import ValidationError as _ValidationError
+
+
+def _site(url: str) -> str:
+    return JiraSourceIn(type="jira", base_url=url, email="a@b.c", api_token="t", project_key="KAN").base_url
+
+
+def test_cloud_addresses_reduce_to_the_site_root():
+    assert _site("https://acme.atlassian.net/jira/software/projects/KAN/boards/1") == "https://acme.atlassian.net"
+    assert _site("https://acme.atlassian.net/wiki/spaces/SD/overview") == "https://acme.atlassian.net"
+    assert _site("https://acme.atlassian.net/browse/KAN-12?focusedCommentId=1") == "https://acme.atlassian.net"
+    assert _site("https://acme.atlassian.net/") == "https://acme.atlassian.net"
+
+
+def test_self_hosted_jira_keeps_its_context_path():
+    assert _site("https://jira.example.com/jira/browse/OPS-7") == "https://jira.example.com/jira"
+
+
+def test_project_key_is_required():
+    with _pytest.raises(_ValidationError):
+        JiraSourceIn(type="jira", base_url="https://acme.atlassian.net", email="a@b.c", api_token="t", project_key="")

@@ -339,10 +339,12 @@ async def fetch_urls(urls: list[str]) -> list[dict]:
                 resp = await client.get(url, headers={"User-Agent": "Sensei/1.0"})
                 resp.raise_for_status()
                 soup = BeautifulSoup(resp.text, "html.parser")
-                for tag in soup(["script", "style", "nav", "footer", "header"]):
+                # Navigation and footers are boilerplate. A page <header> is not:
+                # it is where an article's own title and summary usually sit.
+                for tag in soup(["script", "style", "nav", "footer"]):
                     tag.decompose()
                 text = soup.get_text(separator="\n", strip=True)
-                title = soup.title.string.strip() if soup.title else url
+                title = page_title(soup, text, url)
                 results.append({
                     "content": text,
                     "metadata": {"source": "url", "url": url, "title": title},
@@ -353,6 +355,80 @@ async def fetch_urls(urls: list[str]) -> list[dict]:
                     "metadata": {"source": "url", "url": url, "error": str(exc)},
                 })
     return results
+
+
+def page_title(soup, text: str, url: str) -> str:
+    """A fetched page's name: its <title>, else its first heading, else the file name in its URL."""
+    if soup.title and soup.title.string and soup.title.string.strip():
+        return soup.title.string.strip()
+    h1 = soup.find("h1")
+    if h1 and h1.get_text(strip=True):
+        return h1.get_text(strip=True)[:120]
+    heading = re.search(r"^\s{0,3}#\s+(.+?)\s*#*\s*$", text or "", re.M)
+    if heading:
+        return heading.group(1).strip()[:120]
+    from urllib.parse import urlparse
+    path = urlparse(url).path.rstrip("/")
+    return path.rsplit("/", 1)[-1] or urlparse(url).netloc or url
+
+
+def docx_text(file_path: str) -> str:
+    """
+    Everything a person reads in a Word file, in reading order: paragraphs and
+    tables as they appear, text boxes, then headers and footers.
+
+    Reading only `doc.paragraphs` silently dropped every table, and real
+    handover documents keep their owners, dates and figures in tables.
+    """
+    from docx import Document
+    from docx.oxml.ns import qn
+    from docx.table import Table
+    from docx.text.paragraph import Paragraph
+
+    doc = Document(file_path)
+    parts: list[str] = []
+
+    def table_lines(table) -> list[str]:
+        lines = []
+        for row in table.rows:
+            cells: list[str] = []
+            for cell in row.cells:
+                t = cell.text.strip()
+                if t and (not cells or cells[-1] != t):      # merged cells repeat
+                    cells.append(t)
+            if cells:
+                lines.append(" | ".join(cells))
+        return lines
+
+    def block_lines(container, parent) -> list[str]:
+        lines = []
+        for child in container.iterchildren():
+            if child.tag == qn("w:p"):
+                t = Paragraph(child, parent).text
+                if t.strip():
+                    lines.append(t)
+            elif child.tag == qn("w:tbl"):
+                lines.extend(table_lines(Table(child, parent)))
+        return lines
+
+    parts.extend(block_lines(doc.element.body, doc))
+    for box in doc.element.body.iter(qn("w:txbxContent")):
+        t = "\n".join("".join(n.text or "" for n in p.iter(qn("w:t"))) for p in box.iter(qn("w:p"))).strip()
+        if t and t not in parts:
+            parts.append(t)
+    seen: set[str] = set()
+    for section in doc.sections:
+        for part in (section.header, section.footer):
+            try:
+                if part.is_linked_to_previous and seen:
+                    continue
+                for line in block_lines(part._element, part):
+                    if line not in seen:
+                        seen.add(line)
+                        parts.append(line)
+            except Exception:
+                continue
+    return "\n".join(parts)
 
 
 @tool
@@ -373,9 +449,7 @@ def parse_file(file_path: str, filename: str) -> list[dict]:
                 })
 
     elif ext == ".docx":
-        from docx import Document
-        doc = Document(file_path)
-        text = "\n".join(p.text for p in doc.paragraphs if p.text.strip())
+        text = docx_text(file_path)
         results.append({"content": text, "metadata": {"source": "file", "filename": filename, "page": 1}})
 
     else:  # .md, .txt
@@ -445,6 +519,10 @@ _BLOCK_NODES = {
 
 
 def _adf_text(node) -> str:
+    if isinstance(node, str):
+        # The agile board API hands descriptions and comments over as plain
+        # wiki text rather than ADF; the words are the words either way.
+        return node
     if isinstance(node, list):
         return "".join(_adf_text(n) for n in node)
     if not isinstance(node, dict):
@@ -567,26 +645,25 @@ async def fetch_jira(base_url: str, email: str, api_token: str, project_key: str
         except httpx.HTTPError:
             pass
         try:
-            start_at = 0
-            # One page of 50 silently truncated bigger projects, same cap as Confluence.
+            # Jira Cloud retired /rest/api/3/search in 2025 (410 Gone); the
+            # replacement pages with a token instead of an offset.
+            token = None
             while len(issues) < 300:
-                resp = await client.get(f"{base}/rest/api/3/search", params={
-                    "jql": f"project = {key}",
-                    "fields": fields,
-                    "maxResults": 50,
-                    "startAt": start_at,
-                })
+                params = {"jql": f"project = {key}", "fields": fields, "maxResults": 50}
+                if token:
+                    params["nextPageToken"] = token
+                resp = await client.get(f"{base}/rest/api/3/search/jql", params=params)
                 resp.raise_for_status()
                 payload = resp.json()
                 batch = payload.get("issues", [])
                 issues.extend(batch)
-                if not batch or start_at + len(batch) >= (payload.get("total") or len(batch)):
+                token = payload.get("nextPageToken")
+                if not batch or payload.get("isLast", True) or not token:
                     break
-                start_at += len(batch)
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code not in (410, 404):
                 raise
-            # New sites can serve 410 Gone on /search until the index builds;
+            # A site without the new endpoint yet, or with no search index:
             # the agile board API lists issues without it.
             issues = await _issues_via_board(client, base, key, fields)
 
@@ -842,6 +919,235 @@ def make_inventory_tool(workspace_id: str, chroma_client, allowed_sources: list[
     return list_project_knowledge
 
 
+_TOOL_NAMES = re.compile(
+    r"\b(?:according to|in|on|from|inside)?\s*(?:the\s+)?"
+    r"(?:confluence|jira|github|gitlab|slack|notion|google drive|sharepoint)\b",
+    re.I,
+)
+
+
+def without_tool_names(query: str) -> str:
+    """The question with the names of the tools it came through taken out."""
+    cleaned = re.sub(r"\s+", " ", _TOOL_NAMES.sub(" ", query)).strip(" ,")
+    return cleaned if len(cleaned) >= 12 else query
+
+
+def interleave(rankings: list[list[tuple]], n: int, per_page: int = 2) -> list[tuple]:
+    """
+    Take from each ranking in turn, skipping repeats and any page that already
+    holds `per_page` places. Rows are (chunk_id, document, metadata, distance).
+    """
+    out: list[tuple] = []
+    seen: set = set()
+    per: dict = {}
+    iterators = [iter(r) for r in rankings]
+    while iterators and len(out) < n:
+        for it in list(iterators):
+            for row in it:
+                chunk_id, _doc, meta, _dist = row
+                page = (meta.get("source_label"),
+                        meta.get("title") or meta.get("path") or meta.get("url") or chunk_id)
+                if chunk_id in seen or per.get(page, 0) >= per_page:
+                    continue
+                seen.add(chunk_id)
+                per[page] = per.get(page, 0) + 1
+                out.append(row)
+                break
+            else:
+                iterators.remove(it)
+            if len(out) >= n:
+                break
+    if len(out) < n:
+        # The cap stops one page crowding others out. When there are no others
+        # (a long web page, one big README) it must not mean fewer passages.
+        for ranking in rankings:
+            for row in ranking:
+                if len(out) >= n:
+                    break
+                if row[0] not in seen:
+                    seen.add(row[0])
+                    out.append(row)
+    return out
+
+
+_IDENTIFIER = re.compile(r"(?<![\w.-])(?=[\w.-]*\d|[A-Za-z0-9]+[._-][A-Za-z0-9])[A-Za-z0-9]+(?:[._-][A-Za-z0-9]+)*(?![\w-])")
+_SEARCH_WORD = re.compile(r"[A-Za-z][A-Za-z]{4,}")
+_COMMON = {
+    "about", "according", "after", "again", "being", "between", "could", "doesn", "every", "first",
+    "happens", "might", "other", "their", "there", "these", "those", "under", "using", "where", "which",
+    "while", "would", "should", "roughly", "project", "anyone", "someone", "something", "please", "thing",
+    "things", "right", "still", "since", "before", "through", "during", "without", "within", "whose",
+}
+
+
+# How much containing the question's distinctive words counts beside meaning.
+# Similarity scores for a relevant chunk sit around 0.4–0.75; a chunk holding
+# every distinctive word gains 0.3, enough to lift it a few places, not enough
+# to put an off-topic chunk that repeats one word above a relevant one.
+LEXICAL_WEIGHT = 0.3
+# A version or key ("2.3.1", "KAN-1") names exactly one thing; it counts for more
+# than an ordinary word.
+IDENT_BOOST = 3.0
+# How far behind a chunk from another page may score before a third chunk from
+# the same page is preferred to it. Diversity is worth a little relevance, not a lot.
+PAGE_MARGIN = 0.08
+_QUERY_WORD = re.compile(r"[A-Za-z][A-Za-z]{3,}")
+_STOPWORDS = _COMMON_SHORT = {
+    "what", "when", "with", "that", "this", "from", "have", "does", "into", "your", "they", "them",
+    "then", "than", "were", "will", "some", "more", "also", "just", "like", "need", "want", "know",
+    "tell", "give", "each", "only", "been", "here", "such", "much", "many", "used", "over", "long",
+    "take", "takes", "make", "made", "work", "worked", "happen", "same", "avoid", "how", "who",
+}
+
+
+def _stem(word: str) -> str:
+    """Enough stemming to match "fixed" to "Fix:" and "installs" to "install"."""
+    for suffix in ("ing", "ed", "es", "s"):
+        if word.endswith(suffix) and len(word) - len(suffix) >= 3:
+            word = word[: -len(suffix)]
+            break
+    return word[:6] if len(word) > 7 else word
+
+
+def pick_diverse(scored: list[tuple[float, tuple]], n: int, per_page: int = 2,
+                 margin: float = PAGE_MARGIN) -> list[tuple]:
+    """
+    The top `n` rows by score, with no page taking more than `per_page` places
+    unless every other page is well behind.
+
+    A hard cap let the Strands README hold only two places while its passage
+    with the install command, scored 0.69, lost to a 0.52 architecture page.
+    """
+    remaining = sorted(scored, key=lambda sr: -sr[0])
+    out: list[tuple] = []
+    per: dict = {}
+
+    def page(row):
+        meta = row[2]
+        return (meta.get("source_label"), meta.get("title") or meta.get("path") or meta.get("url") or row[0])
+
+    while remaining and len(out) < n:
+        best_score, best = remaining[0]
+        if per.get(page(best), 0) >= per_page:
+            alt = next(((sc, r) for sc, r in remaining if per.get(page(r), 0) < per_page), None)
+            if alt is not None and best_score - alt[0] <= margin:
+                best_score, best = alt
+        remaining = [(sc, r) for sc, r in remaining if r[0] != best[0]]
+        per[page(best)] = per.get(page(best), 0) + 1
+        out.append(best)
+    return out
+
+
+def _variants(term: str) -> list[str]:
+    return list(dict.fromkeys([term, term.lower(), term.capitalize(), term.upper()]))
+
+
+def term_weights(query: str, collection, where: dict | None) -> dict[str, float]:
+    """
+    The question's words that say what it is about, weighted by how rare they
+    are in this project (a word in every chunk tells the ranking nothing).
+    Keys are lower-case stems ("installs" -> "instal") matched as substrings.
+    """
+    try:
+        count = collection.count()
+    except Exception:
+        return {}
+    terms: dict[str, float] = {}
+    for m in _IDENTIFIER.finditer(query or ""):
+        terms.setdefault(m.group(0), IDENT_BOOST if re.search(r"\d", m.group(0)) else 2.0)
+    for w in _QUERY_WORD.findall(query or ""):
+        lw = w.lower()
+        if lw in _COMMON or lw in _STOPWORDS or any(lw in t.lower() for t in terms):
+            continue
+        terms.setdefault(_stem(lw), 1.0)
+    import math
+    weights: dict[str, float] = {}
+    for term, boost in terms.items():
+        try:
+            clauses = [{"$contains": v} for v in _variants(term)]
+            args = {"where_document": clauses[0] if len(clauses) == 1 else {"$or": clauses}, "include": []}
+            if where:
+                args["where"] = where
+            df = len(collection.get(**args)["ids"])
+        except Exception:
+            return {}
+        if df == 0 or df > count * 0.5:
+            continue
+        weights[term.lower()] = boost * math.log((count + 1) / (df + 1))
+    return weights
+
+
+def lexical_match(doc: str, weights: dict[str, float]) -> float:
+    """The share of the question's weighted words this chunk contains, 0 to 1."""
+    total = sum(weights.values())
+    if not total:
+        return 0.0
+    text = (doc or "").lower()
+    return sum(w for term, w in weights.items() if term in text) / total
+
+
+def distinctive_terms(query: str, collection, where: dict | None, limit: int = 2) -> list[str]:
+    """
+    The words in a question that name something: a version ("2.3.1"), a key
+    ("KAN-1"), or a word only a few chunks contain ("locally", "rollback").
+
+    Embedding similarity is weak on exactly these. "What was fixed in release
+    2.3.1?" ranked every release-ish passage above the changelog line that
+    starts "## 2.3.1", and "run it locally" ranked the README's "Running
+    locally" section tenth. A ranking restricted to chunks containing the term
+    gets them into the candidates.
+    """
+    count = collection.count()
+    cap = max(3, int(count * 0.06))
+    idents = list(dict.fromkeys(m.group(0) for m in _IDENTIFIER.finditer(query or "")))
+    words = list(dict.fromkeys(w.lower() for w in _SEARCH_WORD.findall(query or "")
+                               if w.lower() not in _COMMON))
+    scored: list[tuple[int, int, str]] = []
+    for rank, term in [(0, t) for t in idents] + [(1, w) for w in words if w not in {i.lower() for i in idents}]:
+        try:
+            args = {"where_document": {"$contains": term}, "include": [], "limit": cap + 1}
+            if where:
+                args["where"] = where
+            df = len(collection.get(**args)["ids"])
+        except Exception:
+            continue
+        if 1 <= df <= cap:
+            scored.append((rank, df, term))
+    return [t for _, _, t in sorted(scored)[:limit]]
+
+
+_ANSWER_TOKEN = re.compile(r"[A-Za-z0-9][\w.-]*\d[\w.-]*|[A-Za-z]{4,}")
+
+
+def relevant_citations(citations: list[dict], answer: str) -> list[dict]:
+    """
+    The pages the answer actually drew on, out of every page retrieved for it.
+
+    Six passages are retrieved before the model runs, and all six used to be
+    shown as sources, so a rollback answer cited the Leeds cut-over plan. A
+    page counts when its passage shares the answer's distinctive words (names,
+    numbers, versions); the best match is always kept, so an answer that did
+    search is never shown as ungrounded.
+    """
+    def public(c):
+        return {k: v for k, v in c.items() if not k.startswith("_")}
+
+    if not citations:
+        return []
+    words = {w.lower() for w in _ANSWER_TOKEN.findall(answer or "")} - _COMMON - _STOPWORDS
+    if not words:
+        return [public(c) for c in citations[:1]]
+    overlap = [len(words & {w.lower() for w in _ANSWER_TOKEN.findall(c.get("_text") or c.get("excerpt") or "")})
+               for c in citations]
+    best = max(overlap)
+    if best == 0:
+        return [public(c) for c in citations[:1]]
+    keep = [public(c) for c, n in zip(citations, overlap) if n >= max(3, best * 0.4) or n == best]
+    for i, c in enumerate(keep, start=1):
+        c["index"] = i
+    return keep
+
+
 def make_search_tool(
     workspace_id: str,
     chroma_client,
@@ -850,9 +1156,14 @@ def make_search_tool(
     passage_chars: int = 800,
     budget: int = 3,
     allowed_sources: list[str] | None = None,
+    exclude_data_types: list[str] | None = None,
 ):
     """
     Factory that returns a (search_tool, captured_results) pair.
+
+    exclude_data_types drops whole classes of record from the query — the
+    meeting listener uses it to keep transcripts out of claim checks, because
+    a thing somebody said last week is hearsay, not documentation.
     The search_tool is a Strands @tool that queries the workspace ChromaDB collection.
     captured_results accumulates citation data from each tool call for the caller to read.
     """
@@ -862,7 +1173,7 @@ def make_search_tool(
     # Dedup lives in the factory closure, not the call: the agent loop calls this
     # tool several times per question, and per-call dedup let the same document
     # come back once per call.
-    seen_labels: set[str] = set()
+    seen_pages: set[tuple] = set()
     seen_chunks: set[str] = set()
     calls = {"n": 0}
 
@@ -877,23 +1188,8 @@ def make_search_tool(
     # compound into daily token caps.
     MAX_SEARCHES = budget
 
-    @tool
-    def search_project_docs(query: str) -> str:
-        """
-        Search the indexed project knowledge base for content relevant to the query.
-        Returns the most relevant passages from indexed sources (GitHub repos, files, URLs, Confluence).
-        Call this for ANY question about the project, codebase, team, architecture, commits, or documentation.
-        Do NOT call this for general knowledge questions unrelated to the project.
-        """
-        calls["n"] += 1
-        if calls["n"] > MAX_SEARCHES:
-            return (
-                f"Search budget reached ({MAX_SEARCHES} searches). Do not search again. "
-                "Answer the user now from the passages you have already been given. "
-                "If they do not cover the question, say plainly that the workspace "
-                "does not contain that information."
-            )
-
+    def unmetered(query: str) -> str:
+        """The search itself, outside the per-turn budget: retrieval done on the model's behalf."""
         collection = get_workspace_collection(chroma_client, workspace_id)
         count = collection.count()
         if count == 0:
@@ -902,29 +1198,66 @@ def make_search_tool(
         # Chunks are small enough to fit the embedder's window, so ask for more of
         # them — a section's answer is often split across two neighbouring chunks.
         n = min(n_results, count)
+        fetch = min(count, max(n * 3, 12))
         # Filtering happens in the query, not after it. Retrieving everything and
         # then discarding what the asker may not see would mean a restricted
         # person gets fewer results rather than different ones — and would leak
         # the existence of the rest through the gaps.
         query_args = {
-            "query_texts": [query],
-            "n_results": n,
+            "n_results": fetch,
             "include": ["documents", "metadatas", "distances"],
         }
+        clauses = []
         if allowed_sources is not None:
             if not allowed_sources:
                 return (
                     "You have not been given access to any of this project's sources. "
                     "Ask the project owner."
                 )
-            query_args["where"] = {"source_id": {"$in": allowed_sources}}
+            clauses.append({"source_id": {"$in": allowed_sources}})
+        if exclude_data_types:
+            clauses.append({"data_type": {"$nin": list(exclude_data_types)}})
+        if len(clauses) == 1:
+            query_args["where"] = clauses[0]
+        elif clauses:
+            query_args["where"] = {"$and": clauses}
 
-        results = collection.query(**query_args)
-
-        ids = results["ids"][0]
-        docs = results["documents"][0]
-        metadatas = results["metadatas"][0]
-        distances = results["distances"][0]
+        # Naming the tool ("according to Confluence", "the GitHub repo") pulls in
+        # pages that are about the tool itself: Confluence's own getting-started
+        # pages filled every place for a deployment question and the runbook was
+        # not among them. So the question is searched as asked and without those
+        # names, the two rankings are interleaved, and no page takes more than
+        # two places.
+        # One pool of candidates: the question as asked and without tool names
+        # (naming "Confluence" pulled in Confluence's own help pages), plus the
+        # chunks containing a word that names something — a version, a key, a
+        # word few chunks share. Then one ranking over all of it: meaning first,
+        # with credit for containing the question's own distinctive words.
+        # Similarity alone ranked the README's "Both SDKs default to Amazon
+        # Bedrock" seventh and the CHANGELOG's "## 2.3.1" line eleventh.
+        cleaned = without_tool_names(query)
+        pool: dict[str, tuple] = {}
+        for q in dict.fromkeys([cleaned, query]):
+            r = collection.query(query_texts=[q], **query_args)
+            for row in zip(r["ids"][0], r["documents"][0], r["metadatas"][0], r["distances"][0]):
+                pool.setdefault(row[0], row)
+        where = query_args.get("where")
+        for term in distinctive_terms(query, collection, where, limit=3):
+            try:
+                r = collection.query(query_texts=[cleaned],
+                                     **{**query_args, "n_results": min(fetch, 8),
+                                        "where_document": {"$contains": term}})
+            except Exception:
+                continue
+            for row in zip(r["ids"][0], r["documents"][0], r["metadatas"][0], r["distances"][0]):
+                pool.setdefault(row[0], row)
+        weights = term_weights(cleaned, collection, where)
+        scored = [(1 - float(row[3]) + LEXICAL_WEIGHT * lexical_match(row[1], weights), row) for row in pool.values()]
+        picked = pick_diverse(scored, n, per_page=2)
+        ids = [row[0] for row in picked]
+        docs = [row[1] for row in picked]
+        metadatas = [row[2] for row in picked]
+        distances = [row[3] for row in picked]
 
         if not docs:
             return "No relevant content found for this query."
@@ -949,17 +1282,46 @@ def make_search_tool(
             )
             score = round(1 - float(dist), 3)
             passages.append(f"[{i + 1}] Source: {label} (relevance {score:.0%})\n{doc[:passage_chars]}")
-            if label not in seen_labels:
-                seen_labels.add(label)
+            # One citation per page, not per source: "Confluence: SD" is a whole
+            # space, and its first passage was shown as the evidence for answers
+            # that came from a different page in it.
+            title = meta.get("title") or meta.get("path") or meta.get("filename") or meta.get("url") or ""
+            page = (label, title)
+            if page not in seen_pages:
+                seen_pages.add(page)
+                body = re.sub(r"^\[[^\]\n]*\]\n", "", doc)      # the provenance line is not the excerpt
                 captured.append({
                     "index": len(captured) + 1,
                     "source_label": label,
-                    "excerpt": doc[:250] + ("…" if len(doc) > 250 else ""),
+                    "title": title,
+                    "excerpt": body[:250] + ("…" if len(body) > 250 else ""),
                     "score": score,
+                    "_text": body,          # for relevant_citations; never sent or stored
                 })
 
         return "\n\n---\n\n".join(passages)
 
+    @tool
+    def search_project_docs(query: str) -> str:
+        """
+        Search the indexed project knowledge base for content relevant to the query.
+        Returns the most relevant passages from indexed sources (GitHub repos, files, URLs, Confluence).
+        Call this for ANY question about the project, codebase, team, architecture, commits, or documentation.
+        Do NOT call this for general knowledge questions unrelated to the project.
+        """
+        calls["n"] += 1
+        if calls["n"] > MAX_SEARCHES:
+            return (
+                f"Search budget reached ({MAX_SEARCHES} searches). Do not search again. "
+                "Answer the user now from the passages you have already been given. "
+                "If they do not cover the question, say plainly that the workspace "
+                "does not contain that information."
+            )
+        return unmetered(query)
+
+    # Retrieval Sensei does before the model runs must not spend the model's
+    # own searches.
+    search_project_docs.unmetered = unmetered
     return search_project_docs, captured
 
 

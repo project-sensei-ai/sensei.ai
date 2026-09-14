@@ -14,6 +14,7 @@ import {
   Sparkles,
   Upload,
   Users,
+  Video,
   X,
 } from 'lucide-react'
 import { AppShell } from '@/components/AppShell'
@@ -28,8 +29,12 @@ import {
   useGetMyWorkspaceQuery,
   useGetLedgerQuery,
   useGetSourcesQuery,
+  useGetTrustQuery,
+  useGetReadinessQuery,
+  useRerunReadinessMutation,
   type SourceStatus,
 } from '@/services/onboardingApi'
+import { SenseiAvatar } from '@/components/SenseiAvatar'
 import {
   errorMessage,
   useGetMeQuery,
@@ -60,6 +65,7 @@ const typeIcon = {
   confluence: Globe,
   jira: CircleDot,
   slack: MessageSquare,
+  meeting: Video,
 } as const
 
 const statusMeta: Record<SourceStatus, { label: string; className: string; dot: string }> = {
@@ -83,6 +89,77 @@ const statusMeta: Record<SourceStatus, { label: string; className: string; dot: 
     className: 'border-border bg-muted text-muted-foreground',
     dot: 'bg-muted-foreground',
   },
+}
+
+/**
+ * The self-interview. The only score on the dashboard Sensei gave itself —
+ * and the two questions it failed are the most useful thing on the page.
+ */
+function ReadinessCard({ isOwner }: { isOwner: boolean }) {
+  const { data } = useGetReadinessQuery(undefined, { pollingInterval: 8000 })
+  const [rerun, { isLoading }] = useRerunReadinessMutation()
+  const [open, setOpen] = useState(false)
+  const r = data?.readiness
+  if (!r) return null
+  const missing = r.items.filter((i) => !i.answerable)
+  const pct = r.total ? Math.round((r.score / r.total) * 100) : 0
+  return (
+    <Card className={r.status === 'running' ? 'border-dashed' : ''}>
+      <CardHeader className="pb-2">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-baseline gap-1">
+            <span className="text-3xl font-semibold tabular-nums">{r.status === 'running' && !r.total ? '…' : r.score}</span>
+            <span className="text-sm text-muted-foreground">of {r.total || '?'}</span>
+          </div>
+          <div className="min-w-0 flex-1">
+            <CardTitle className="text-base">
+              {r.status === 'running' ? 'Sensei is interviewing itself' : `Ready for ${pct}% of a new joiner's first-week questions`}
+            </CardTitle>
+            <CardDescription>
+              {r.status === 'running'
+                ? 'Writing the questions a new joiner would ask, then trying to answer them from the sources alone.'
+                : missing.length
+                ? `${missing.length} it could not answer from the sources. They are in the ledger — answer each once and it knows forever.`
+                : 'It could answer all of them from the sources. Nothing to close.'}
+            </CardDescription>
+          </div>
+          <Badge variant="secondary" className="h-5 text-[10px]">on its own</Badge>
+        </div>
+      </CardHeader>
+      {r.items.length > 0 && (
+        <CardContent className="flex flex-col gap-2 pt-0">
+          <button className="self-start text-xs text-muted-foreground underline-offset-2 hover:underline" onClick={() => setOpen((o) => !o)}>
+            {open ? 'Hide the questions' : 'See the questions it asked itself'}
+          </button>
+          {open && (
+            <ul className="flex flex-col gap-1.5">
+              {r.items.map((i) => (
+                <li key={i.question} className="flex gap-2 text-sm">
+                  <span className={`mt-0.5 shrink-0 ${i.answerable ? 'text-green-600' : 'text-amber-600'}`}>{i.answerable ? '✓' : '✗'}</span>
+                  <span className="min-w-0">
+                    <span>{i.question}</span>
+                    {i.answerable && i.source && <span className="ml-1 text-xs text-muted-foreground">[{i.source}]</span>}
+                    {!i.answerable && <span className="ml-1 text-xs text-amber-600">not in the sources</span>}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="flex flex-wrap items-center gap-3">
+            {missing.length > 0 && (
+              <Button asChild size="sm" variant="outline"><Link to="/answers">Close them in the ledger</Link></Button>
+            )}
+            {isOwner && (
+              <Button size="sm" variant="ghost" disabled={isLoading || r.status === 'running'} onClick={() => rerun()}>
+                {isLoading ? 'Starting…' : 'Interview again'}
+              </Button>
+            )}
+            {r.refresh_error && <span className="text-xs text-muted-foreground">Last re-run did not complete — {r.refresh_error}</span>}
+          </div>
+        </CardContent>
+      )}
+    </Card>
+  )
 }
 
 function SetPasswordBanner() {
@@ -229,7 +306,7 @@ function SourceSnapshot({ isOwner }: { isOwner: boolean }) {
         })}
         {isOwner && (
           <p className="text-xs text-muted-foreground">
-            The watch loop re-reads changed sources automatically.
+            “Check for changes” re-reads them and re-indexes whatever moved.
           </p>
         )}
       </CardContent>
@@ -246,6 +323,7 @@ export default function Dashboard() {
   const { data: digestData } = useGetDigestsQuery()
   const { data: ledger } = useGetLedgerQuery()
   const { data: sourcesData } = useGetSourcesQuery()
+  const { data: trust } = useGetTrustQuery()
   const [checkForChanges, { isLoading: checking }] = useCheckForChangesMutation()
   const [ackDigest] = useAckDigestMutation()
   const [checkResult, setCheckResult] = useState<string | null>(null)
@@ -253,6 +331,7 @@ export default function Dashboard() {
   const user = data?.user
   const workspace = wsData?.workspace
   const isOwner = workspace?.role !== 'member'
+  const reach = trust?.coverage
   const chunksIndexed = (sourcesData?.sources ?? []).reduce(
     (sum, s) => sum + (s.status === 'ready' ? s.stats?.chunks_count ?? 0 : 0),
     0,
@@ -262,38 +341,50 @@ export default function Dashboard() {
     <AppShell>
       {user && user.has_password === false && <SetPasswordBanner />}
 
-      {/* Page header: greeting on the left, one clear action on the right */}
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            Welcome back{user ? `, ${user.name.split(' ')[0]}` : ''}
+      {/* The colleague, on duty: who it works for, what it can reach, and the
+          actions people come here for. */}
+      <div className="flex flex-col gap-4 rounded-2xl border bg-gradient-to-br from-primary/[0.06] via-transparent to-transparent p-5 sm:flex-row sm:items-center sm:gap-6">
+        <SenseiAvatar size="lg" pulse />
+        <div className="min-w-0 flex-1">
+          <h1 className="text-xl font-semibold tracking-tight">
+            Sensei is on duty{workspace ? ` for ${workspace.name}` : ''}
           </h1>
-          <p className="text-muted-foreground">
-            {workspace
-              ? isOwner
-                ? `You own ${workspace.name}. The agent reads only what you connect.`
-                : `You're on ${workspace.name}. Ask the agent anything about it.`
-              : "Here's your project context at a glance."}
+          <p className="mt-0.5 text-sm text-muted-foreground">
+            {user ? `Welcome back, ${user.name.split(' ')[0]}. ` : ''}
+            {isOwner
+              ? 'It reads what you connected, uses the accounts you granted, and speaks only when it can cite something.'
+              : 'Ask it anything about the project, hand it work, or bring it into a meeting.'}
           </p>
+          {reach && (
+            <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted-foreground">
+              <span><span className="font-semibold text-foreground tabular-nums">{reach.sources}</span> sources · <span className="font-semibold text-foreground tabular-nums">{reach.indexed_chunks}</span> passages</span>
+              <span><span className="font-semibold text-foreground tabular-nums">{reach.tools ?? 0}</span> tools{reach.write_enabled ? `, writes allowed on ${reach.write_enabled}` : ', read-only'}</span>
+              <span><span className="font-semibold text-foreground tabular-nums">{reach.people_with_access}</span> people can ask</span>
+            </div>
+          )}
           {checkResult && (
-            <p className="mt-1 text-xs text-muted-foreground">{checkResult}</p>
+            <p className="mt-2 text-xs text-muted-foreground">{checkResult}</p>
           )}
         </div>
-        {isOwner && (
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-1.5"
-            disabled={checking}
-            onClick={async () => {
-              const r = await checkForChanges().unwrap().catch(() => null)
-              setCheckResult(r?.material ? null : (r?.message ?? 'Could not check just now.'))
-            }}
-          >
-            <RefreshCw className={`h-3.5 w-3.5 ${checking ? 'animate-spin' : ''}`} />
-            {checking ? 'Re-reading the sources…' : 'Check for changes'}
-          </Button>
-        )}
+        <div className="flex shrink-0 flex-wrap gap-2">
+          <Button asChild size="sm"><Link to="/chat">Ask something</Link></Button>
+          <Button asChild size="sm" variant="outline"><Link to="/meetings">Join a meeting</Link></Button>
+          {isOwner && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              disabled={checking}
+              onClick={async () => {
+                const r = await checkForChanges().unwrap().catch(() => null)
+                setCheckResult(r?.material ? null : (r?.message ?? 'Could not check just now.'))
+              }}
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${checking ? 'animate-spin' : ''}`} />
+              {checking ? 'Re-reading the sources…' : 'Check for changes'}
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* A material change is the most time-sensitive thing the agent produces. */}
@@ -352,6 +443,8 @@ export default function Dashboard() {
           </Card>
         </Link>
       )}
+
+      <ReadinessCard isOwner={isOwner} />
 
       {/* The number the product is judged on, front and centre. */}
       {ledger?.stats && ledger.stats.answers_given > 0 && (

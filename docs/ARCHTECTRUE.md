@@ -1,6 +1,6 @@
 # Sensei
 
-A permission-aware platform that learns approved project context and participates through chat and Microsoft Teams meetings. Built with [Strands Agents SDK](https://strandsagents.com/).
+A colleague a project owner onboards: sources to read, tools to use, a seat in meetings. Built with [Strands Agents SDK](https://strandsagents.com/).
 
 ## What It Does
 
@@ -13,7 +13,11 @@ project never wrote down, and offer to draft the missing documents. A question
 it cannot ground is recorded, so one human reply becomes knowledge it keeps.
 
 Asked directly, it answers with citations — streamed, narrating each tool call
-as it runs.
+as it runs — and does work: reads a person's commits, checks Jira live, hands
+back a spreadsheet, or acts through any MCP server the owner connected, with
+writes refused inside the agent loop unless the owner allowed them. In a
+meeting it answers when addressed and corrects only with a citation and a
+confidence floor.
 
 ---
 
@@ -104,9 +108,11 @@ How content gets into the agent's memory.
 | **File Upload** | None (platform auth) | PDF, MD, TXT, DOCX | ✅ Built |
 | **URLs** | None | Any public web page (pre-validated with HEAD request) | ✅ Built |
 | **Confluence** | API token | Wiki spaces, pages | ✅ Built |
-| **Jira** | API token | Issues, comments, status (same token as Confluence) | ✅ Built |
+| **Jira** | Same Atlassian token | Issues in one project, indexed for finding; status read live via `jira_search` / `jira_issue` | ✅ Built |
+| **Meeting notes** | None | Transcript + typed summary of an ended meeting; excluded from claim checks | ✅ Built |
+| **MCP tool grant** | Bearer token / API key | Not indexed — *used*. Any MCP server's tools, classified read/write, gated by a Strands hook | ✅ Built |
+| **Slack** | Bot token | Messages and threaded replies in one channel the app was added to | ✅ Built |
 | SharePoint | MS Graph OAuth | Documents, folders | Future |
-| Slack | OAuth | Channel messages | Future |
 
 See `Agents.md` for the full list of data types fetched per source and the contributors vs collaborators distinction.
 
@@ -509,6 +515,21 @@ research_cache
 token_usage
 └── per background operation, so spend is a query not a guess
 
+tool_grants
+├── workspace_id · name · kind (mcp_http | mcp_sse | mcp_stdio) · url | command+args
+├── config_secret   {authorization, env} encrypted
+├── tools[]         {name, server_name, description, access: read|write}
+├── allow_write · disabled_tools[] · status · uses · last_used_at
+
+artifacts
+├── workspace_id · session_id · title · filename · path · mime · kind · size
+
+meetings
+├── workspace_id · title · mode (companion | meet_bot) · meet_url · status · bot_status
+├── transcript[]    {speaker, text, at}
+├── replies[]       {kind: answer|correction|silent, text, citations[], confidence, reason, trigger}
+└── summary         {summary, decisions[], action_items[], open_questions[]} · source_id
+
 chat_sessions
 ├── _id             (UUID)
 ├── workspace_id    (compound index with archived + updated_at)
@@ -518,6 +539,7 @@ chat_sessions
 │   ├── role        (user | assistant)
 │   ├── content
 │   ├── citations[] (assistant messages only)
+│   ├── artifacts[] · tools_used[]
 │   └── created_at
 ├── created_at
 ├── updated_at      (used for sidebar sort order)
@@ -588,16 +610,23 @@ DAY 4 — Demo
 - Sources page — live status, delete (MongoDB + ChromaDB), re-ingest
 - Chat page — session sidebar, session list, archive button
 
+- Tool grants — any MCP server (HTTP, SSE, stdio) with an encrypted credential; read/write classification; `WriteGate` hook; per-turn relevance selection; pooled sessions
+- Work tools — `create_spreadsheet`, `write_document`; artifacts downloadable from the reply
+- `who_did_what` over commit/PR/ticket records; live Jira tools riding on the Confluence credential
+- Meetings — companion (browser speech) and Google Meet bot (Playwright captions → chat); answer / correction / silence with reasons; typed notes indexed as a source
+- Onboarding brief (Strands Graph), gap hunter with drafts, change watch, answer ledger, Trust page, per-member source visibility
+- Model fallback chain on daily quota; timestamps serialised in UTC
+
 ### Future (Post-Hackathon)
 
 See `docs/STRATEGY_AND_BUILD_PLAN.md` for the full sequenced plan, market
 analysis, and access-model design.
 
-- Teams / Slack channel adapters
-- Real-time source sync via webhooks
-- Per-user permission filtering
-- Jira, SharePoint connectors
-- Multi-agent orchestration
+- Teams / Slack channel transports (the abstraction and the speak-only-with-a-citation rule exist)
+- Real-time source sync via webhooks; GitHub App instead of a PAT
+- Per-document ACLs synced from the source
+- Voice output inside Google Meet (needs a virtual audio device)
+- SharePoint, ServiceNow connectors
 
 ---
 

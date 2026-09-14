@@ -71,7 +71,7 @@ class JiraSourceIn(BaseModel):
     base_url: str
     email: str
     api_token: str
-    project_key: str
+    project_key: str = Field(..., min_length=1, max_length=20)
     label: str = ""
 
     @field_validator("base_url")
@@ -82,12 +82,20 @@ class JiraSourceIn(BaseModel):
             raise ValueError(
                 "Jira site must be a URL, like https://your-org.atlassian.net"
             )
-        # People paste the ticket they are looking at; cut it back to the site.
-        marker = "/browse/"
-        idx = v.find(marker)
-        if idx != -1:
-            v = v[:idx]
-        return v
+        # People paste whatever is in the address bar: a ticket, a board, even
+        # the Confluence page they came from. Jira Cloud's API lives at the site
+        # root, so an atlassian.net address is cut back to scheme and host.
+        scheme, _, rest = v.partition("://")
+        host = rest.split("/", 1)[0]
+        if host.endswith(".atlassian.net"):
+            return f"{scheme}://{host}"
+        # Self-hosted Jira can sit under a context path, so cut only at parts of
+        # an address that are never part of the base.
+        for marker in ("/browse/", "/projects/", "/jira/software/", "/secure/", "/issues/", "/wiki"):
+            idx = v.find(marker)
+            if idx != -1:
+                v = v[:idx]
+        return v.rstrip("/")
 
 
 class SlackSourceIn(BaseModel):
@@ -213,6 +221,31 @@ async def _verify_jira(body) -> None:
                 "account that created the API token, and the token must not have expired.",
             )
         if r.status_code == 404 or "application/json" not in r.headers.get("content-type", ""):
+            # A real Atlassian site with Confluence but no Jira also answers 404
+            # here. Calling its address wrong sends the owner hunting for a typo
+            # that is not there, so check for Confluence before blaming the URL.
+            has_confluence = False
+            try:
+                wiki = await c.get(f"{base}/wiki/rest/api/space", params={"limit": 1})
+                if wiki.status_code in (401, 403):
+                    raise HTTPException(
+                        status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        "Atlassian rejected those credentials. The email must be the Atlassian "
+                        "account that created the API token, and the token must not have expired.",
+                    )
+                has_confluence = (wiki.status_code == 200
+                                  and "application/json" in wiki.headers.get("content-type", ""))
+            except HTTPException:
+                raise
+            except Exception:
+                pass
+            if has_confluence:
+                raise HTTPException(
+                    status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    f"{base} is a real Atlassian site and these credentials work, but the site "
+                    "has Confluence only, no Jira. Add Jira to it at admin.atlassian.com (the "
+                    "free plan is enough), or enter the site where your Jira lives.",
+                )
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_ENTITY,
                 f"{base} doesn't look like a Jira site. The address is usually "
@@ -229,9 +262,11 @@ async def _verify_jira(body) -> None:
             listing = await c.get(
                 f"{base}/rest/api/3/project/search", params={"maxResults": 100}
             )
-            visible = "; ".join(
-                p.get("key", "") for p in listing.json().get("values", []) if p.get("key")
-            ) or "none"
+            try:
+                values = listing.json().get("values", []) if listing.status_code == 200 else []
+            except ValueError:
+                values = []
+            visible = "; ".join(p.get("key", "") for p in values if p.get("key")) or "none"
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_ENTITY,
                 f"No project with key '{project_key}' is visible to this account. "
