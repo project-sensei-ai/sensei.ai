@@ -85,7 +85,7 @@ chromadb plus the embedding model will OOM at 512 MB.
 | `MONGO_DB_NAME` | yes | defaults to `sensei` |
 | `JWT_SECRET` | yes | signs session cookies |
 | `SECRET_ENCRYPTION_KEY` | yes | encrypts source credentials and tool-grant tokens at rest |
-| `ANTHROPIC_API_KEY` | recommended | paid Claude; answers first, free tiers become fallbacks |
+| `ANTHROPIC_API_KEY` | recommended | paid Claude (Haiku 4.5 by default); answers first, free tiers become fallbacks |
 | `GROQ_API_KEY` | unless Bedrock or Anthropic | free development backend, 200k tokens a day per model |
 | `GROQ_FALLBACK_MODELS` | no | comma list tried when a model's daily quota is exhausted |
 | `MAX_GRANT_TOOLS_PER_TURN` | no | granted MCP tools offered per question, only those it touches (default 4) |

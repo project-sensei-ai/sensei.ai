@@ -22,8 +22,9 @@ class Settings(BaseSettings):
     # Agent / Vector store
     # Paid and dependable: with an Anthropic key set, Claude answers first and
     # the free-tier chain below becomes the fallback instead of the only path.
+    # Haiku 4.5 everywhere: fast, cheap, and enough for grounded answers.
     ANTHROPIC_API_KEY: str = ""
-    ANTHROPIC_MODEL: str = "claude-sonnet-5"
+    ANTHROPIC_MODEL: str = "claude-haiku-4-5-20251001"
     ANTHROPIC_BACKGROUND_MODEL: str = "claude-haiku-4-5-20251001"
     GROQ_API_KEY: str = ""
     # Interactive chat gets the capable model. Background agents — the ones that

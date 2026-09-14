@@ -110,8 +110,9 @@ DEBUG=true                  # drops the Secure cookie flag so login works over H
 > unreadable — they have to be reconnected.
 
 **Paid Claude:** set `ANTHROPIC_API_KEY` (console.anthropic.com) and Claude
-Sonnet 5 answers chat with Haiku 4.5 on background work; the free tiers below
-become fallbacks. Groq's free tier allows 200,000 tokens a day per model, which
+Haiku 4.5 answers chat and does the background work; the free tiers below
+become fallbacks. `ANTHROPIC_MODEL` and `ANTHROPIC_BACKGROUND_MODEL` pick
+other Claude models. Groq's free tier allows 200,000 tokens a day per model, which
 a demo day of testing uses up.
 
 **Free hosted fallbacks:** set any of `CEREBRAS_API_KEY` (cloud.cerebras.ai,
