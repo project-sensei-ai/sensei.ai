@@ -62,7 +62,7 @@ col = 44
 box(col, 130, 300, 86, "A person asks", ["chat, streamed, tool calls narrated"], BLUE, BLUE_S)
 box(col, 228, 300, 86, "An owner adds a teammate", ["nobody asks for anything"], PINK, PINK_S, badge="unprompted")
 box(col, 326, 300, 86, "A source finishes indexing", ["the corpus changed"], PINK, PINK_S, badge="unprompted")
-box(col, 424, 300, 86, "Something is said in a meeting", ["companion mic, or the Google Meet bot"], BLUE, BLUE_S)
+box(col, 424, 300, 86, "Something is said in a meeting or Slack", ["companion mic, the Meet bot, or a channel"], BLUE, BLUE_S)
 box(col, 522, 300, 86, "The clock", ["sources re-read on a schedule"], PINK, PINK_S, badge="unprompted")
 
 # ── 2. The judgement ──────────────────────────────────────────────────────────
@@ -104,7 +104,7 @@ arrow(1112, 380, 1160, 320, GREEN_S, "ag")
 # ── 4. Serving + state ────────────────────────────────────────────────────────
 section(44, 660, "4 — SERVING")
 box(44, 672, 300, 96, "FastAPI · one container · one URL", ["/api/* + built SPA", "SSE: tool calls, tokens, files", "Caddy for HTTPS on EC2"], GREY, GREY_S)
-box(44, 782, 300, 96, "Model backends, one flag", ["Bedrock · Groq · Ollama", "background work on a smaller model", "daily-quota fallback chain"], GREY, GREY_S)
+box(44, 782, 300, 96, "Model backends, one flag", ["Claude Haiku 4.5 (Anthropic) first", "Groq free tier as the fallback chain", "Bedrock · Ollama · a limit moves the call on"], GREY, GREY_S)
 box(44, 892, 300, 96, "Auth", ["JWT in an httpOnly cookie", "single-use invites bound to an email", "passwords never emailed"], GREY, GREY_S)
 
 section(392, 660, "5 — STATE")
@@ -114,16 +114,16 @@ box(392, 816, 340, 96, "ChromaDB  (per workspace)", ["ws_{id}: chunks + provenan
 box(392, 926, 340, 62, "Disk", ["artifacts/ (xlsx, docx) · uploads/"], GREY, GREY_S)
 
 section(772, 660, "6 — WHAT COMES OUT")
-box(772, 672, 340, 96, "Answers", ["cited by source label", "freshness stated: synced vs live", "refusals stated, not hidden"], BLUE, BLUE_S)
+box(772, 672, 340, 96, "Answers", ["plain sentences, the key facts in bold", "the steps it took, kept on the message", "sources shown · freshness stated · refusals stated"], BLUE, BLUE_S)
 box(772, 782, 340, 96, "Artifacts", ["a brief · a drafted page · a digest", "a spreadsheet · a document", "meeting notes: decisions, actions"], PINK, PINK_S)
 box(772, 892, 340, 96, "The ledger", ["what it could not answer", "one human reply → indexed forever", "answered-without-a-human, week on week"], PINK, PINK_S)
 
 section(1160, 660, "7 — WHERE IT SPEAKS")
 box(1160, 672, 396, 96, "Web chat", ["the tool trail, live", "downloads attached to the reply"], BLUE, BLUE_S)
 box(1160, 782, 396, 96, "Meetings", ["companion: browser speech → text → judgement", "Google Meet bot: captions in, chat replies out"], BLUE, BLUE_S)
-box(1160, 892, 396, 96, "Channels (abstraction ready)", ["Teams · Slack adapters: parse / send / describe_grant", "speak only with a citation"], GREY, GREY_S, dashed=True)
+box(1160, 892, 396, 96, "Slack (connected)", ["mention or DM → always answers, in the thread", "an unaddressed question → only with a citation", "messages indexed as they arrive · Teams adapter ready"], BLUE, BLUE_S)
 
-text(44, 1060, "Strands surface used:  Agent · @tool · MCPClient · hooks (BeforeToolCallEvent) · multiagent.GraphBuilder · structured_output_async · stream_async · ModelRetryStrategy · S3SessionManager",
+text(44, 1060, "Strands surface used:  Agent · @tool · MCPClient · hooks (BeforeToolCallEvent) · multiagent.GraphBuilder · structured_output_async · stream_async · AnthropicModel / OpenAIModel · AfterModelCallEvent failover · S3SessionManager",
      12.5, 500, MUTED)
 text(44, 1084, "Every gate is code, not prompt: writes are cancelled in the hook, members are filtered in the vector query, corrections need a typed verdict, a floor and a citation.",
      12.5, 400, MUTED)

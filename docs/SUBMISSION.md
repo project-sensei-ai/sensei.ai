@@ -49,6 +49,13 @@ from a stale index. "Put the open issues in a spreadsheet" produces an .xlsx.
 "Create the issue" goes through the connected GitHub tools — or is refused,
 inside the agent loop, if the owner has not allowed writes on that connection.
 
+**In Slack.** Add the Slack app to a channel and Sensei is in the room
+there too: it reads what people post and indexes it as it arrives, answers
+when mentioned or messaged directly, and answers a question nobody addressed
+to it only when the sources can cite the answer, in the message's thread with
+the sources named. Chatter is left alone; a mention it cannot answer goes to
+the ledger.
+
 **In meetings.** Sensei sits in the call. It answers when addressed. It
 corrects a wrong claim only when a typed verdict says the project's own
 documentation contradicts it, with confidence above 0.8 and a citation — all
@@ -67,13 +74,16 @@ loaded through `MCPClient`; a `BeforeToolCallEvent` hook enforces the write
 gate; a Strands `Graph` of three agents researches each onboarding brief;
 `structured_output` produces typed briefs, gap reports, change verdicts,
 claim verdicts and meeting notes; `stream_async` narrates tool calls to the
-UI. FastAPI, React, MongoDB, ChromaDB. One container, HTTPS via Caddy, on
-AWS EC2. Model backends: Bedrock, Groq or Ollama behind one flag.
+UI, and every answer is plain sentences with the steps Sensei took kept on
+the message. FastAPI, React, MongoDB, ChromaDB. One container, HTTPS via
+Caddy, on AWS EC2. Models: Claude Haiku 4.5 through the Anthropic API, with
+Groq's free tier as the fallback chain; Bedrock and Ollama behind one flag.
 
 ## Built with
 
-Strands Agents SDK · Model Context Protocol · Amazon Bedrock · Amazon EC2 ·
-FastAPI · React · MongoDB Atlas · ChromaDB · Playwright · Caddy
+Strands Agents SDK · Model Context Protocol · Anthropic Claude Haiku 4.5 ·
+Groq · Amazon Bedrock · Amazon EC2 · Slack Events API · FastAPI · React ·
+MongoDB Atlas · ChromaDB · Playwright · Caddy
 
 ---
 
@@ -90,14 +100,15 @@ Maya (owner) and Priya (member). Rehearse; do not narrate errors.
 | 1:20–1:45 | **Dashboard**: the readiness card — "Ready for 5 of 8 first-week questions", open the list, the ✗ ones marked "not in the sources", then **Answers** showing them in the ledger asked by "Sensei (self-check)" | "Before it starts, it interviews itself: the questions a new hire would ask, answered from the sources alone, graded honestly. What it fails goes to the ledger — a human answers once, and it knows forever. Then **Gaps**: what nobody wrote down, drafted where the sources allow." |
 | 1:45–2:35 | **Chat** as Priya: "What did Daniel change recently?" → who_did_what narration → cited answer. Then "Put the open issues and PRs in a spreadsheet" → tool trail: GitHub list issues → list PRs → building the spreadsheet → download chip; open the .xlsx | "Ask it like a colleague. Who did what comes from commits and PRs, not prose. Ask for a spreadsheet and it uses the GitHub tools, then hands you the file." |
 | 2:35–3:00 | Chat: "Create an issue for the notify-service owner gap" → tool trail shows the write attempt → the refusal sentence. Cut to Maya's Tools page, flip "Allow writes", back to Priya, retry → issue created, link shown | "It tried to create the issue and was refused — inside the agent loop, not by a prompt. Maya allows writes. Now it does it, because a person asked." |
-| 3:00–3:50 | **Meetings**, companion mode, mic on. Ravi (you, second voice) says "we deploy to us-east-1". Sensei stays quiet. Then "the primary database is DynamoDB" → correction bubble with 0.9 and the ADR cited. Then "Sensei, who's on call next week?" → spoken answer. End meeting → notes with decisions | "In a meeting it listens. A wrong claim that the docs contradict gets a correction — with the source, only above 0.8 confidence. Addressed by name, it answers. When the call ends, it writes the notes and indexes them." |
+| 3:00–3:25 | **Slack**, #all-sensei: mention the bot with "what's the deploy window?" → the threaded answer with its source; then post "does anyone know when the Fabrikam demo is?" without a mention → Sensei answers in the thread; then "lunch anyone?" → nothing. | "It is in Slack the way a colleague is. Ask it, it answers. Ask the room something the docs answer, it steps in, with the source. Small talk, it stays out." |
+| 3:25–3:50 | **Meetings**, companion mode, mic on. Ravi (you, second voice) says "we deploy to us-east-1". Sensei stays quiet. Then "the primary database is DynamoDB" → correction bubble with 0.9 and the ADR cited. Then "Sensei, who's on call next week?" → spoken answer. End meeting → notes with decisions | "In a meeting it listens. A wrong claim that the docs contradict gets a correction — with the source, only above 0.8 confidence. Addressed by name, it answers. When the call ends, it writes the notes and indexes them." |
 | 3:50–4:20 | **Trust** page: ceiling vs floor for the Confluence token, the GitHub tools by class, "what it never does". Then **Answers**: the ledger and "answered without a human" | "Everything it can reach, with the honest ceiling of each credential. And the number this product lives on: questions answered without a human." |
 | 4:20–4:50 | Architecture diagram; code flash of `@tool`, `MCPClient`, `BeforeToolCallEvent`, `GraphBuilder`, `structured_output_async` | "Built on Strands: custom tools and MCP tools in one loop, a hook that enforces the write gate, a three-agent graph for research, typed outputs everywhere, streaming to the UI. One container on AWS." |
 | 4:50–5:00 | Live URL + repo on screen | "Sensei. Onboard it like a colleague." |
 
 ## Judge instructions (paste into "Testing instructions")
 
-See `TESTING.md` in the repo. Two projects, two owners:
+Live: https://34-229-232-67.sslip.io (see `TESTING.md` in the repo). Two projects, two owners:
 
 - `judge@sensei.demo` / `Demo-miwVU8NczE6N` — owns **Sensei Demo Project**
   (this codebase's own documentation).

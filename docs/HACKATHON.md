@@ -51,8 +51,8 @@ Every item below is required — missing any risks disqualification:
   - Working-project demonstration
   - Pitch covering all three: **(1) problem, (2) who it's for, (3) why it matters**
   - Slides/screen recording/voiceover fine — camera not needed
-- [ ] AWS Builder ID
-- [x] (Optional, recommended) Live demo URL — https://54-198-101-11.sslip.io (EC2 via `deploy/launch-ec2.sh`, in TESTING.md)
+- [x] AWS Builder ID — exists on the team lead's account (the sign-in email)
+- [x] (Optional, recommended) Live demo URL — https://34-229-232-67.sslip.io (EC2 via `deploy/launch-ec2.sh`, in TESTING.md)
 - [x] All materials in **English**
 
 ### Bonus points (up to +0.6 total)
