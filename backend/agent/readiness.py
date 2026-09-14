@@ -147,6 +147,9 @@ async def run_readiness(db, chroma_client, workspace_id: str, force: bool = Fals
 
         # What it could not answer is the most useful output. Into the ledger,
         # as questions Sensei asked itself, so an owner can close them once.
+        # Each interview replaces the previous one's open self-check questions;
+        # the ones a person already answered stay, because they are knowledge.
+        await db.unanswered.delete_many({"workspace_id": workspace_id, "asked_by_id": SELF["id"], "status": "open"})
         for i in items:
             if not i["answerable"]:
                 await answer_store.record(db, workspace_id, i["question"], SELF, "self-check")
